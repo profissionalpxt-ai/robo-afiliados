@@ -1,0 +1,10 @@
+{
+  "nome_grupo_whatsapp": "Achadinhos & Ofertas",
+  "link_afiliado_padrao": "https://s.shopee.com.br/",
+  "afiliado_id": "",
+  "intervalo_envio_minutos": 60,
+  "adicionar_tag_anuncio": true,
+  "auto_enviar_ao_adicionar": false,
+  "telegram_token": "8451447981:AAHdf3zE2QZ0Yd38PP5MoDaz_IOmj9JmNnQ",
+  "telegram_chat_id": 5960174121
+}
