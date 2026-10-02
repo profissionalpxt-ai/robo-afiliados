@@ -277,9 +277,14 @@ def varrer_canais() -> list:
                 # Dispara no WhatsApp (com a foto original ou texto)
                 w_st = "Pendente"
                 if wpp_conectado:
-                    enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
-                    w_st = "Enviado"
-                    print(f"   📲 Oferta enviada ao Grupo do WhatsApp com foto original e texto completo!")
+                    res_w = enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
+                    print(f"👉 RESPOSTA BAILEYS: {res_w}")
+                    if res_w.get("sucesso") is True:
+                        w_st = "Enviado"
+                        print(f"   📲 Oferta enviada ao Grupo do WhatsApp com sucesso!")
+                    else:
+                        w_st = f"Erro ({res_w.get('erro', 'Falha')})"
+                        print(f"   ⚠️ Falha ao enviar para WhatsApp: {res_w}")
 
                 # Registra no log ao vivo
                 registrar_log_envio(
@@ -433,8 +438,12 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
         
         w_st = "Pendente"
         if wpp_conectado:
-            enviar_para_grupo_whatsapp(foto_envio, texto_envio)
-            w_st = "Enviado"
+            res_w = enviar_para_grupo_whatsapp(foto_envio, texto_envio)
+            print(f"👉 RESPOSTA BAILEYS FILA: {res_w}")
+            if res_w.get("sucesso") is True:
+                w_st = "Enviado"
+            else:
+                w_st = f"Erro ({res_w.get('erro', 'Falha')})"
             
         registrar_log_envio(
             tipo="PRODUTO",

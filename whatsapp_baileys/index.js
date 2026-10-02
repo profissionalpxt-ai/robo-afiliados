@@ -144,26 +144,27 @@ const server = http.createServer(async (req, res) => {
                     return res.end(JSON.stringify({ erro: 'Grupo de destino não identificado' }));
                 }
 
+                let resultadoEnvio;
                 if (caminhoFoto && fs.existsSync(caminhoFoto)) {
                     const bufferFoto = fs.readFileSync(caminhoFoto);
-                    await sock.sendMessage(grupoDestino, {
+                    resultadoEnvio = await sock.sendMessage(grupoDestino, {
                         image: bufferFoto,
-                        caption: legenda
+                        caption: String(legenda || '')
                     });
                     console.log(`📤 Oferta enviada com foto para: ${grupoDestino}`);
                 } else {
-                    await sock.sendMessage(grupoDestino, {
-                        text: legenda
+                    resultadoEnvio = await sock.sendMessage(grupoDestino, {
+                        text: String(legenda || '')
                     });
                     console.log(`📤 Oferta enviada com texto para: ${grupoDestino}`);
                 }
 
                 res.writeHead(200);
-                return res.end(JSON.stringify({ sucesso: true }));
+                return res.end(JSON.stringify({ sucesso: true, id: resultadoEnvio?.key?.id }));
             } catch (e) {
-                console.error("Erro no envio:", e);
+                console.error("❌ Erro no envio Baileys:", e);
                 res.writeHead(500);
-                return res.end(JSON.stringify({ erro: e.message }));
+                return res.end(JSON.stringify({ sucesso: false, erro: e.message || String(e) }));
             }
         });
         return;

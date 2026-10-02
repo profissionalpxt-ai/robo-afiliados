@@ -82,6 +82,15 @@ import subprocess
 
 def iniciar_servico_baileys():
     time.sleep(2)
+    # Se o Baileys já estiver rodando (iniciado pelo start.sh), não inicia outro processo
+    try:
+        r = requests.get("http://127.0.0.1:3333/status", timeout=2)
+        if r.status_code == 200:
+            print("✅ [NUVEM] Baileys já está ativo na porta 3333.")
+            return
+    except Exception:
+        pass
+
     caminho_baileys = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp_baileys")
     index_file = os.path.join(caminho_baileys, "index.js")
     node_modules = os.path.join(caminho_baileys, "node_modules")
@@ -215,22 +224,35 @@ def api_logs():
 
 @app.route("/api/status-radar")
 def api_status_radar():
-    status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "status_radar.json")
-    if os.path.exists(status_path):
+    total_fila = 0
+    fila_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fila", "ofertas_prontas.json")
+    if os.path.exists(fila_path):
         try:
-            with open(status_path, "r", encoding="utf-8") as f:
-                return jsonify(json.load(f))
+            with open(fila_path, "r", encoding="utf-8") as f:
+                total_fila = len(json.load(f))
         except Exception:
             pass
-    return jsonify({
+
+    status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "status_radar.json")
+    dados = {
         "ultima_varredura": "Ativo agora",
         "status": "online",
         "envios_ativos": True,
         "canais_ativos": 5,
-        "total_fila_reserva": 58,
+        "total_fila_reserva": total_fila,
         "novos_ultimo_ciclo": 0,
-        "proxima_varredura_segundos": 180
-    })
+        "proxima_varredura_segundos": 180 if total_fila > 10 else 300
+    }
+    if os.path.exists(status_path):
+        try:
+            with open(status_path, "r", encoding="utf-8") as f:
+                carregado = json.load(f)
+                dados.update(carregado)
+        except Exception:
+            pass
+            
+    dados["total_fila_reserva"] = total_fila
+    return jsonify(dados)
 
 HTML_WHATSAPP = """
 <!DOCTYPE html>
@@ -496,7 +518,7 @@ HTML_WHATSAPP = """
                     document.getElementById('stat-ultima').innerText = data.ultima_varredura || 'Ao vivo';
                 }
                 if (document.getElementById('stat-fila')) {
-                    document.getElementById('stat-fila').innerText = `${data.total_fila_reserva || 58} prontas`;
+                    document.getElementById('stat-fila').innerText = `${data.total_fila_reserva !== undefined ? data.total_fila_reserva : 0} prontas`;
                 }
                 if (data.envios_ativos !== undefined) {
                     atualizarBotaoEnvios(data.envios_ativos);
