@@ -30,11 +30,23 @@ def criar_story_9_16(
     draw = ImageDraw.Draw(imagem)
     largura, altura = imagem.size # 1080 x 1920
     
+    # Suporte a fontes TrueType tanto em Windows quanto no Linux do Render
     fonte_bold = "C:/Windows/Fonts/arialbd.ttf"
     fonte_norm = "C:/Windows/Fonts/arial.ttf"
-    fonte_black = "C:/Windows/Fonts/ariblk.ttf" # Arial Black para impacto
-    if not os.path.exists(fonte_black):
-        fonte_black = fonte_bold
+    fonte_black = "C:/Windows/Fonts/ariblk.ttf"
+
+    if not os.path.exists(fonte_bold):
+        for f in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"]:
+            if os.path.exists(f):
+                fonte_bold = f
+                fonte_black = f
+                break
+
+    if not os.path.exists(fonte_norm):
+        for f in ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"]:
+            if os.path.exists(f):
+                fonte_norm = f
+                break
 
     try:
         font_titulo = ImageFont.truetype(fonte_black, 48)

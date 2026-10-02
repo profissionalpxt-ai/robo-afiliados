@@ -82,14 +82,47 @@ HTML_DASHBOARD = """
 def index():
     return render_template_string(HTML_DASHBOARD)
 
+import gc
+import subprocess
+
+def iniciar_servico_baileys():
+    time.sleep(2)
+    caminho_baileys = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp_baileys")
+    index_file = os.path.join(caminho_baileys, "index.js")
+    node_modules = os.path.join(caminho_baileys, "node_modules")
+    
+    # Se estiver rodando na nuvem e o node_modules não estiver presente, instala sozinho
+    if not os.path.exists(node_modules) and os.path.exists(caminho_baileys):
+        try:
+            print("📦 [NUVEM] Instalando dependências do Baileys via npm...")
+            subprocess.run(["npm", "install", "--production"], cwd=caminho_baileys, check=True)
+            print("✅ [NUVEM] Dependências do Baileys instaladas com sucesso!")
+        except Exception as e:
+            print(f"⚠️ [NUVEM] Aviso ao instalar npm: {e}")
+
+    if os.path.exists(index_file):
+        try:
+            print("🚀 [NUVEM] Inicializando Conector WhatsApp Baileys em background...")
+            env = os.environ.copy()
+            env["NODE_OPTIONS"] = "--max-old-space-size=128"
+            subprocess.Popen(["node", "index.js"], cwd=caminho_baileys, env=env)
+            print("✅ [NUVEM] Processo Baileys WhatsApp ativo na porta 3333!")
+        except Exception as e:
+            print(f"⚠️ [NUVEM] Erro ao iniciar Baileys: {e}")
+
+# Inicia o conector WhatsApp Baileys em segundo plano
+threading.Thread(target=iniciar_servico_baileys, daemon=True).start()
+
 def iniciar_radar_background():
-    time.sleep(8)
+    # Aguarda 15 segundos para dar tempo do Baileys subir e conectar
+    time.sleep(15)
     while True:
         try:
             from core.radar_shopee import varrer_canais
             varrer_canais()
         except Exception as e:
             print(f"Erro no loop do radar: {e}")
+        gc.collect()
         time.sleep(180)
 
 # Inicia o radar em segundo plano na nuvem
@@ -100,13 +133,37 @@ def varrer_agora():
     try:
         from core.radar_shopee import varrer_canais
         novas = varrer_canais()
+        gc.collect()
         return jsonify({
             "status": "sucesso",
             "novas_ofertas": len(novas),
-            "mensagem": f"{len(novas)} ofertas da Shopee processadas e enviadas ao Telegram!"
+            "mensagem": f"{len(novas)} itens da Shopee processados e enviados!"
         }), 200
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+@app.route("/whatsapp-status")
+def whatsapp_status():
+    try:
+        from core.whatsapp_baileys_sender import verificar_conexao_baileys
+        status = verificar_conexao_baileys()
+        return jsonify({
+            "status_baileys": status,
+            "dispositivo": "Achadinhos da Família",
+            "timestamp": int(time.time())
+        }), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route("/limpar-cache")
+def limpar_cache():
+    try:
+        from core.radar_shopee import faxina_pastas_temporarias
+        faxina_pastas_temporarias()
+        gc.collect()
+        return jsonify({"status": "sucesso", "mensagem": "Cache de mídia e memória limpos com sucesso!"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 @app.route("/ping")
 @app.route("/health")
@@ -114,7 +171,7 @@ def health():
     return jsonify({
         "status": "online",
         "app": "Achadinhos da Família",
-        "servico": "Radar de Ofertas Shopee",
+        "servico": "Radar de Ofertas e Cupons Shopee 24/7",
         "canais_monitorados": 5,
         "timestamp": int(time.time())
     }), 200

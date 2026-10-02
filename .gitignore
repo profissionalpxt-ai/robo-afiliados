@@ -9,3 +9,4 @@ __pycache__/
 *.bat
 sessao_whatsapp/
 config/sessao_telegram.session
+whatsapp_baileys/node_modules/
