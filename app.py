@@ -109,16 +109,28 @@ def iniciar_servico_baileys():
 threading.Thread(target=iniciar_servico_baileys, daemon=True).start()
 
 def iniciar_radar_background():
-    # Aguarda 15 segundos para dar tempo do Baileys subir e conectar
-    time.sleep(15)
+    # Aguarda 10 segundos para dar tempo do Baileys subir e conectar
+    time.sleep(10)
     while True:
         try:
-            from core.radar_shopee import varrer_canais
-            varrer_canais()
+            from core.radar_shopee import varrer_canais, carregar_status_radar
+            st = carregar_status_radar()
+            if st.get("envios_ativos", True):
+                varrer_canais()
+            else:
+                print("⏸️ [RADAR] Envios automáticos pausados pelo usuário no painel.")
         except Exception as e:
             print(f"Erro no loop do radar: {e}")
         gc.collect()
-        time.sleep(180)
+        
+        try:
+            from core.radar_shopee import carregar_status_radar
+            st = carregar_status_radar()
+            delay = st.get("proxima_varredura_segundos", 180)
+        except Exception:
+            delay = 180
+            
+        time.sleep(delay)
 
 # Inicia o radar em segundo plano na nuvem
 threading.Thread(target=iniciar_radar_background, daemon=True).start()
@@ -136,6 +148,35 @@ def varrer_agora():
         }), 200
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+@app.route("/api/pausar-envios", methods=["GET", "POST"])
+def pausar_envios():
+    try:
+        from core.radar_shopee import salvar_status_radar
+        salvar_status_radar({"envios_ativos": False})
+        return jsonify({"status": "pausado", "envios_ativos": False, "mensagem": "Envios pausados com sucesso!"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route("/api/retomar-envios", methods=["GET", "POST"])
+def retomar_envios():
+    try:
+        from core.radar_shopee import salvar_status_radar
+        salvar_status_radar({"envios_ativos": True})
+        return jsonify({"status": "ativo", "envios_ativos": True, "mensagem": "Envios retomados com sucesso!"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+@app.route("/api/toggle-envios", methods=["GET", "POST"])
+def toggle_envios():
+    try:
+        from core.radar_shopee import carregar_status_radar, salvar_status_radar
+        st = carregar_status_radar()
+        novo = not st.get("envios_ativos", True)
+        salvar_status_radar({"envios_ativos": novo})
+        return jsonify({"status": "ok", "envios_ativos": novo}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 @app.route("/whatsapp-status")
 def whatsapp_status():
@@ -184,6 +225,7 @@ def api_status_radar():
     return jsonify({
         "ultima_varredura": "Ativo agora",
         "status": "online",
+        "envios_ativos": True,
         "canais_ativos": 5,
         "total_fila_reserva": 58,
         "novos_ultimo_ciclo": 0,
@@ -271,6 +313,19 @@ HTML_WHATSAPP = """
             transition: 0.2s;
         }
         .btn:hover { background: #e64a19; }
+        .btn-pause { background: #d32f2f !important; }
+        .btn-pause:hover { background: #b71c1c !important; }
+        .btn-resume { background: #2e7d32 !important; }
+        .btn-resume:hover { background: #1b5e20 !important; }
+        .badge-ctrl {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: bold;
+            margin: 10px 0;
+            transition: all 0.3s;
+        }
         .stats-bar {
             display: flex;
             justify-content: space-around;
@@ -358,6 +413,12 @@ HTML_WHATSAPP = """
         <h1>Achadinhos da Família 🛍️</h1>
         <p>Monitoramento e Automação Shopee em Nuvem 24/7</p>
 
+        <div>
+            <span id="badge-ctrl-envios" class="badge-ctrl" style="background: rgba(76, 175, 80, 0.2); color: #81c784; border: 1px solid #4caf50;">
+                🟢 DISPAROS AUTOMÁTICOS ATIVOS
+            </span>
+        </div>
+
         <div id="status-card-box">
             <div class="card-status">
                 <p>🔄 Verificando status dos serviços...</p>
@@ -380,12 +441,53 @@ HTML_WHATSAPP = """
             </div>
         </div>
 
-        <div style="margin-top: 15px;">
-            <a href="/varrer-agora" class="btn">🚀 Forçar Varredura Agora</a>
+        <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button id="btn-toggle-envios" onclick="toggleEnvios()" class="btn btn-pause">⏸️ Pausar Envios</button>
+            <a href="/varrer-agora" class="btn" style="background: #ff9800;">🚀 Forçar Disparo Agora</a>
         </div>
     </div>
 
     <script>
+        let enviosAtivos = true;
+
+        async function toggleEnvios() {
+            const btn = document.getElementById('btn-toggle-envios');
+            btn.innerText = "⏳ Alterando...";
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/toggle-envios', { method: 'POST' });
+                const data = await res.json();
+                atualizarBotaoEnvios(data.envios_ativos);
+            } catch (e) {
+                alert("Erro ao alterar status: " + e);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function atualizarBotaoEnvios(ativo) {
+            enviosAtivos = ativo;
+            const btn = document.getElementById('btn-toggle-envios');
+            const badge = document.getElementById('badge-ctrl-envios');
+            if (!btn || !badge) return;
+
+            if (ativo) {
+                btn.className = "btn btn-pause";
+                btn.innerText = "⏸️ Pausar Envios";
+                badge.style.background = "rgba(76, 175, 80, 0.2)";
+                badge.style.color = "#81c784";
+                badge.style.borderColor = "#4caf50";
+                badge.innerText = "🟢 DISPAROS AUTOMÁTICOS ATIVOS";
+            } else {
+                btn.className = "btn btn-resume";
+                btn.innerText = "▶️ Retomar Envios";
+                badge.style.background = "rgba(244, 67, 54, 0.2)";
+                badge.style.color = "#ff8a80";
+                badge.style.borderColor = "#f44336";
+                badge.innerText = "⏸️ ENVIOS PAUSADOS PELO USUÁRIO";
+            }
+        }
+
         async function checarRadar() {
             try {
                 const res = await fetch('/api/status-radar');
@@ -395,6 +497,9 @@ HTML_WHATSAPP = """
                 }
                 if (document.getElementById('stat-fila')) {
                     document.getElementById('stat-fila').innerText = `${data.total_fila_reserva || 58} prontas`;
+                }
+                if (data.envios_ativos !== undefined) {
+                    atualizarBotaoEnvios(data.envios_ativos);
                 }
             } catch (e) {}
         }
