@@ -165,6 +165,171 @@ def limpar_cache():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
+HTML_WHATSAPP = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conexão WhatsApp - Achadinhos da Família</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 480px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+        }
+        h1 { margin: 0 0 10px 0; font-size: 24px; color: #ff9800; }
+        p { color: #cfd8dc; font-size: 15px; line-height: 1.5; margin: 10px 0; }
+        .card-status {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        .badge-online {
+            background: #2e7d32;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-weight: bold;
+            display: inline-block;
+            font-size: 14px;
+        }
+        .badge-waiting {
+            background: #e65100;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-weight: bold;
+            display: inline-block;
+            font-size: 14px;
+        }
+        .qr-box {
+            background: #ffffff;
+            padding: 15px;
+            border-radius: 16px;
+            display: inline-block;
+            margin: 15px 0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .btn {
+            background: #ff5722;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 15px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 15px;
+            transition: 0.2s;
+        }
+        .btn:hover { background: #e64a19; }
+        .instructions {
+            text-align: left;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        .instructions ol { margin: 8px 0; padding-left: 20px; }
+        .instructions li { margin-bottom: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container" id="conteudo">
+        <h1>Achadinhos da Família 🛍️</h1>
+        <p>Conexão WhatsApp em Nuvem (Baileys 24/7)</p>
+        <div id="loading" style="padding: 40px 0;">
+            <p>🔄 Verificando status da conexão...</p>
+        </div>
+    </div>
+
+    <script>
+        async function checarStatus() {
+            try {
+                const res = await fetch('/whatsapp-status');
+                const data = await res.json();
+                const container = document.getElementById('conteudo');
+                const st = data.status_baileys || {};
+
+                if (st.conectado) {
+                    container.innerHTML = `
+                        <h1>Achadinhos da Família 🛍️</h1>
+                        <div class="card-status">
+                            <span class="badge-online">🟢 CONECTADO COM SUCESSO</span>
+                            <h3 style="margin: 15px 0 5px 0; color: #a5d6a7;">Aparelho Ativo na Nuvem!</h3>
+                            <p style="margin: 4px 0;">Dispositivo: <b>Achadinhos da Família</b></p>
+                            <p style="margin: 4px 0;">Grupo Alvo: <b>${st.jidGrupo || 'Achadiinhos da Família'}</b></p>
+                        </div>
+                        <p>O robô já está operando 24 horas por dia no servidor da nuvem, sem precisar do computador ligado!</p>
+                        <a href="/varrer-agora" class="btn">🚀 Forçar Varredura Agora</a>
+                    `;
+                } else if (st.qr) {
+                    const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=" + encodeURIComponent(st.qr);
+                    container.innerHTML = `
+                        <h1>Achadinhos da Família 🛍️</h1>
+                        <span class="badge-waiting">📲 LEIA O QR CODE</span>
+                        <div class="qr-box">
+                            <img src="${qrUrl}" alt="QR Code WhatsApp" width="260" height="260" />
+                        </div>
+                        <div class="instructions">
+                            <b>Como conectar pelo seu celular:</b>
+                            <ol>
+                                <li>Abra o <b>WhatsApp</b> no celular</li>
+                                <li>Vá em <b>Configurações / Opções</b></li>
+                                <li>Toque em <b>Aparelhos Conectados</b></li>
+                                <li>Toque em <b>Conectar um Aparelho</b> e aponte para o QR Code acima</li>
+                            </ol>
+                        </div>
+                        <p style="font-size: 13px; color: #b0bec5;">A página atualiza automaticamente assim que você conectar!</p>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <h1>Achadinhos da Família 🛍️</h1>
+                        <div class="card-status">
+                            <p>⏳ O conector Baileys está iniciando ou gerando o QR Code...</p>
+                            <p style="font-size: 13px; color: #90a4ae;">Aguarde alguns segundos, esta tela atualizará sozinha.</p>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        checarStatus();
+        setInterval(checarStatus, 3000);
+    </script>
+</body>
+</html>
+"""
+
+@app.route("/whatsapp")
+def rota_whatsapp():
+    return render_template_string(HTML_WHATSAPP)
+
 @app.route("/ping")
 @app.route("/health")
 def health():
