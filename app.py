@@ -82,6 +82,32 @@ HTML_DASHBOARD = """
 def index():
     return render_template_string(HTML_DASHBOARD)
 
+def iniciar_radar_background():
+    time.sleep(8)
+    while True:
+        try:
+            from core.radar_shopee import varrer_canais
+            varrer_canais()
+        except Exception as e:
+            print(f"Erro no loop do radar: {e}")
+        time.sleep(180)
+
+# Inicia o radar em segundo plano na nuvem
+threading.Thread(target=iniciar_radar_background, daemon=True).start()
+
+@app.route("/varrer-agora")
+def varrer_agora():
+    try:
+        from core.radar_shopee import varrer_canais
+        novas = varrer_canais()
+        return jsonify({
+            "status": "sucesso",
+            "novas_ofertas": len(novas),
+            "mensagem": f"{len(novas)} ofertas da Shopee processadas e enviadas ao Telegram!"
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
 @app.route("/ping")
 @app.route("/health")
 def health():
@@ -89,6 +115,7 @@ def health():
         "status": "online",
         "app": "Achadinhos da Família",
         "servico": "Radar de Ofertas Shopee",
+        "canais_monitorados": 5,
         "timestamp": int(time.time())
     }), 200
 
