@@ -23,10 +23,42 @@ PASTA_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PASTA_MIDIA = os.path.join(PASTA_BASE, "midia")
 PASTA_STORIES = os.path.join(PASTA_BASE, "stories_instagram")
 ARQUIVO_VISTOS = os.path.join(PASTA_BASE, "config", "vistos_radar.json")
+ARQUIVO_HISTORICO = os.path.join(PASTA_BASE, "config", "historico_envios.json")
 
 os.makedirs(PASTA_MIDIA, exist_ok=True)
 os.makedirs(PASTA_STORIES, exist_ok=True)
 os.makedirs(os.path.dirname(ARQUIVO_VISTOS), exist_ok=True)
+
+def registrar_log_envio(tipo: str, titulo: str, canal: str, wpp_status: str, tg_status: str, link: str):
+    """Registra cada disparo no histórico leve de logs (mantém apenas os últimos 50 itens)"""
+    try:
+        historico = []
+        if os.path.exists(ARQUIVO_HISTORICO):
+            try:
+                with open(ARQUIVO_HISTORICO, "r", encoding="utf-8") as f:
+                    historico = json.load(f)
+            except Exception:
+                historico = []
+
+        import datetime
+        agora_str = datetime.datetime.now().strftime("%d/%m %H:%M:%S")
+
+        novo = {
+            "hora": agora_str,
+            "tipo": tipo,
+            "titulo": titulo,
+            "canal": f"@{canal}",
+            "wpp": wpp_status,
+            "tg": tg_status,
+            "link": link
+        }
+        historico.insert(0, novo)
+        historico = historico[:50]
+
+        with open(ARQUIVO_HISTORICO, "w", encoding="utf-8") as f:
+            json.dump(historico, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Erro ao salvar log de histórico: {e}")
 
 def limpar_arquivos_temporarios(caminhos: list):
     """Apaga imagens do disco e força o coletor de lixo da memória RAM"""
@@ -232,9 +264,21 @@ def varrer_canais() -> list:
                         enviar_para_telegram(caminho_story, legenda_tg)
                     
                     # Dispara no WhatsApp se conectado
+                    w_st = "Pendente"
                     if wpp_conectado:
                         enviar_para_grupo_whatsapp(caminho_foto_local, legenda_wpp)
+                        w_st = "Enviado"
                         print(f"   📲 Cupom enviado ao Grupo do WhatsApp!")
+
+                    # Registra no log ao vivo
+                    registrar_log_envio(
+                        tipo="CUPOM",
+                        titulo=f"CUPOM {regra_desconto} ({codigo_cupom})",
+                        canal=canal,
+                        wpp_status=w_st,
+                        tg_status="Enviado",
+                        link=link_afiliado_usuario
+                    )
 
                     # Limpa arquivos imediatamente para liberar disco e memória RAM
                     limpar_arquivos_temporarios([caminho_foto_local, caminho_story])
@@ -297,9 +341,21 @@ def varrer_canais() -> list:
                         enviar_para_telegram(caminho_story, legenda_tg)
                         
                     # Dispara no WhatsApp se conectado
+                    w_st = "Pendente"
                     if wpp_conectado:
                         enviar_para_grupo_whatsapp(caminho_foto_local, legenda_wpp)
+                        w_st = "Enviado"
                         print(f"   📲 Oferta enviada ao Grupo do WhatsApp!")
+
+                    # Registra no log ao vivo
+                    registrar_log_envio(
+                        tipo="PRODUTO",
+                        titulo=f"{titulo} (R$ {preco})",
+                        canal=canal,
+                        wpp_status=w_st,
+                        tg_status="Enviado",
+                        link=link_afiliado_usuario
+                    )
 
                     # Limpa arquivos imediatamente para liberar disco e memória RAM
                     limpar_arquivos_temporarios([caminho_foto_local, caminho_story])
