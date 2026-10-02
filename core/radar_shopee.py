@@ -195,26 +195,28 @@ def varrer_canais() -> list:
                 # ----------------------------------------------------
                 # IDENTIFICAÇÃO: É CUPOM OU OFERTA DE PRODUTO?
                 # ----------------------------------------------------
+                # Procura preço primeiro: se tem preço de venda (R$ XX), É PRODUTO!
+                m_preco = re.search(r'(?:POR|Por apenas|Preço):\s*(?:R\$\s*)?([\d.,]+)', texto_limpo, re.IGNORECASE)
+                if not m_preco:
+                    m_preco = re.search(r'R\$\s*([\d.,]+)', texto_limpo)
+
+                tem_preco = bool(m_preco)
+
+                # Só é tratado como CUPOM se não tiver preço de produto e tiver cupom/desconto
                 e_cupom = bool(
-                    "cupom" in texto_limpo.lower() or 
-                    "off em" in texto_limpo.lower() or 
-                    "resgate aqui" in texto_limpo.lower() or 
-                    canal == "shopeebrcupom"
+                    (canal == "shopeebrcupom" or "código" in texto_limpo.lower() or "cupom:" in texto_limpo.lower()) 
+                    and not tem_preco
                 )
                 
-                # Converte o link para o código do usuário
+                # Converte o link para o código do usuário (link curto e limpo)
                 link_afiliado_usuario = converter_link_shopee(link_concorrente)
                 
-                # Extrai foto do post do Telegram se houver
-                m_foto = re.search(r"background-image:url\('([^']+)'\)", conteudo)
+                # Extrai foto REAL do produto na mensagem (ignora avatar/ícone do canal)
+                m_foto = re.search(r'tgme_widget_message_photo_wrap[^"]*"[^>]*style="background-image:url\(\'([^\']+)\'\)', conteudo)
                 foto_url = m_foto.group(1) if m_foto else ""
-                if not foto_url or "emoji" in foto_url:
-                    cdn_matches = [u for u in re.findall(r'https://cdn\d*\.telesco\.pe/file/[^\s"\')]+\.jpg', conteudo) if 'emoji' not in u]
-                    if cdn_matches:
-                        foto_url = cdn_matches[0]
-                        
+                
                 caminho_foto_local = ""
-                if foto_url and foto_url.startswith("http"):
+                if foto_url and foto_url.startswith("http") and "emoji" not in foto_url:
                     try:
                         r_foto = requests.get(foto_url, timeout=15)
                         if len(r_foto.content) > 5000:
