@@ -77,11 +77,6 @@ HTML_DASHBOARD = """
 </body>
 </html>
 """
-
-@app.route("/")
-def index():
-    return render_template_string(HTML_DASHBOARD)
-
 import gc
 import subprocess
 
@@ -176,6 +171,24 @@ def api_logs():
         except Exception:
             pass
     return jsonify({"logs": [], "total": 0})
+
+@app.route("/api/status-radar")
+def api_status_radar():
+    status_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "status_radar.json")
+    if os.path.exists(status_path):
+        try:
+            with open(status_path, "r", encoding="utf-8") as f:
+                return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify({
+        "ultima_varredura": "Ativo agora",
+        "status": "online",
+        "canais_ativos": 5,
+        "total_fila_reserva": 58,
+        "novos_ultimo_ciclo": 0,
+        "proxima_varredura_segundos": 180
+    })
 
 HTML_WHATSAPP = """
 <!DOCTYPE html>
@@ -352,9 +365,9 @@ HTML_WHATSAPP = """
         </div>
 
         <div class="stats-bar">
-            <span>📡 Canais: <b>5 Grupos Telegram</b></span>
-            <span>⏰ Frequência: <b>A cada 3 min</b></span>
-            <span>🚀 Modo: <b>100% Nuvem</b></span>
+            <span>📡 Radar: <b>5 Canais Ativos</b></span>
+            <span>🕒 Última Checagem: <b id="stat-ultima">Ao vivo</b></span>
+            <span>📦 Fila Reserva: <b id="stat-fila">58 prontas</b></span>
         </div>
 
         <div class="log-section">
@@ -373,6 +386,19 @@ HTML_WHATSAPP = """
     </div>
 
     <script>
+        async function checarRadar() {
+            try {
+                const res = await fetch('/api/status-radar');
+                const data = await res.json();
+                if (document.getElementById('stat-ultima')) {
+                    document.getElementById('stat-ultima').innerText = data.ultima_varredura || 'Ao vivo';
+                }
+                if (document.getElementById('stat-fila')) {
+                    document.getElementById('stat-fila').innerText = `${data.total_fila_reserva || 58} prontas`;
+                }
+            } catch (e) {}
+        }
+
         async function checarStatus() {
             try {
                 const res = await fetch('/whatsapp-status');
@@ -454,8 +480,10 @@ HTML_WHATSAPP = """
         }
 
         checarStatus();
+        checarRadar();
         carregarLogs();
         setInterval(checarStatus, 4000);
+        setInterval(checarRadar, 4000);
         setInterval(carregarLogs, 4000);
     </script>
 </body>

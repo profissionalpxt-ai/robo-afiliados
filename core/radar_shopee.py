@@ -5,6 +5,7 @@ import json
 import time
 import requests
 import gc
+import html
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 try:
@@ -24,10 +25,19 @@ PASTA_MIDIA = os.path.join(PASTA_BASE, "midia")
 PASTA_STORIES = os.path.join(PASTA_BASE, "stories_instagram")
 ARQUIVO_VISTOS = os.path.join(PASTA_BASE, "config", "vistos_radar.json")
 ARQUIVO_HISTORICO = os.path.join(PASTA_BASE, "config", "historico_envios.json")
+ARQUIVO_STATUS = os.path.join(PASTA_BASE, "config", "status_radar.json")
+ARQUIVO_FILA = os.path.join(PASTA_BASE, "fila", "ofertas_prontas.json")
 
 os.makedirs(PASTA_MIDIA, exist_ok=True)
 os.makedirs(PASTA_STORIES, exist_ok=True)
 os.makedirs(os.path.dirname(ARQUIVO_VISTOS), exist_ok=True)
+
+def salvar_status_radar(status_dict: dict):
+    try:
+        with open(ARQUIVO_STATUS, "w", encoding="utf-8") as f:
+            json.dump(status_dict, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Erro ao salvar status do radar: {e}")
 
 def registrar_log_envio(tipo: str, titulo: str, canal: str, wpp_status: str, tg_status: str, link: str):
     """Registra cada disparo no histórico leve de logs (mantém apenas os últimos 50 itens)"""
@@ -45,9 +55,10 @@ def registrar_log_envio(tipo: str, titulo: str, canal: str, wpp_status: str, tg_
 
         novo = {
             "hora": agora_str,
+            "timestamp": int(time.time()),
             "tipo": tipo,
             "titulo": titulo,
-            "canal": f"@{canal}",
+            "canal": f"@{canal}" if not canal.startswith("@") else canal,
             "wpp": wpp_status,
             "tg": tg_status,
             "link": link
@@ -118,21 +129,20 @@ def salvar_vistos(vistos: set):
         print(f"Erro ao salvar vistos: {e}")
 
 def converter_link_shopee(link_curto: str) -> str:
-    """Expande o link de afiliado da Shopee e injeta o ID de afiliado exclusivo do usuário"""
+    """Expande o link da Shopee, remove o lixo criptográfico e gera link limpo de 1 linha"""
     try:
         resp = requests.get(link_curto, headers=HEADERS, allow_redirects=True, timeout=12)
         url_destino = resp.url
         
+        # Procura Shop ID e Item ID para montar a URL curta direta
+        m = re.search(r'/(\d{6,})[/?&]?.*?(\d{8,})', url_destino)
+        if m:
+            shop_id, item_id = m.group(1), m.group(2)
+            return f"https://shopee.com.br/product/{shop_id}/{item_id}?mmp_pid={AFFILIATE_PID}&utm_source={AFFILIATE_PID}&utm_medium=affiliates"
+            
+        # Caso seja página de cupons ou outra categoria
         parsed = urlparse(url_destino)
-        query = parse_qs(parsed.query)
-        
-        query["mmp_pid"] = [AFFILIATE_PID]
-        query["utm_source"] = [AFFILIATE_PID]
-        query["utm_medium"] = ["affiliates"]
-        query["utm_campaign"] = ["radar_achadinhos"]
-        
-        nova_query = urlencode(query, doseq=True)
-        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, nova_query, parsed.fragment))
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}?mmp_pid={AFFILIATE_PID}&utm_source={AFFILIATE_PID}&utm_medium=affiliates"
     except Exception:
         sep = "&" if "?" in link_curto else "?"
         return f"{link_curto}{sep}mmp_pid={AFFILIATE_PID}&utm_source={AFFILIATE_PID}&utm_medium=affiliates"
@@ -179,6 +189,7 @@ def varrer_canais() -> list:
                 m_text = re.search(r'<div class="tgme_widget_message_text[^>]*>(.*?)</div>', conteudo, re.DOTALL)
                 texto_bruto = m_text.group(1) if m_text else conteudo
                 texto_limpo = re.sub(r'<[^>]+>', ' ', texto_bruto)
+                texto_limpo = html.unescape(texto_limpo)
                 texto_limpo = " ".join(texto_limpo.split())
                 
                 # ----------------------------------------------------
@@ -237,7 +248,7 @@ def varrer_canais() -> list:
                         f"⚠️ <i>Cupons Shopee possuem limite de uso, corra!</i>"
                     )
                     
-                    # Legenda para WhatsApp
+                    # Legenda para WhatsApp (limpa e curta)
                     legenda_wpp = (
                         f"🚨 *CUPOM RELÂMPAGO SHOPEE!* 🎟️\n\n"
                         f"🏷️ *Desconto:* {regra_desconto}\n"
@@ -304,7 +315,7 @@ def varrer_canais() -> list:
                         except Exception:
                             preco = m_preco.group(1)
                     else:
-                        preco = "Oferta"
+                        preco = "Confira no Link"
                         
                     print(f"\n🛍️ [PRODUTO NOVO DETECTADO @{canal}]: {titulo} (R$ {preco})")
                     
@@ -374,7 +385,100 @@ def varrer_canais() -> list:
             
     salvar_vistos(vistos)
     print(f"✅ [RADAR] Varredura concluída. Novos itens processados: {len(novos_processados)}")
+
+    # Conta quantas ofertas restam na fila de reserva
+    total_fila = 0
+    if os.path.exists(ARQUIVO_FILA):
+        try:
+            with open(ARQUIVO_FILA, "r", encoding="utf-8") as f_q:
+                total_fila = len(json.load(f_q))
+        except Exception:
+            pass
+
+    # Se nenhum canal postou nada novo, verifica se já faz mais de 15 minutos do último envio
+    if len(novos_processados) == 0:
+        deve_disparar_reserva = False
+        if os.path.exists(ARQUIVO_HISTORICO):
+            try:
+                with open(ARQUIVO_HISTORICO, "r", encoding="utf-8") as f_h:
+                    logs = json.load(f_h)
+                if logs and "timestamp" in logs[0]:
+                    if time.time() - logs[0]["timestamp"] > 900: # 15 minutos
+                        deve_disparar_reserva = True
+                elif not logs:
+                    deve_disparar_reserva = True
+            except Exception:
+                pass
+        
+        if deve_disparar_reserva and total_fila > 0:
+            print("⏳ [FILA RESERVA] Canais em silêncio há mais de 15 min. Disparando oferta de reserva...")
+            disparar_item_fila_reserva(wpp_conectado)
+
+    import datetime
+    salvar_status_radar({
+        "ultima_varredura": datetime.datetime.now().strftime("%d/%m %H:%M:%S"),
+        "status": "online",
+        "canais_ativos": len(CANAIS_RADAR),
+        "total_fila_reserva": total_fila,
+        "novos_ultimo_ciclo": len(novos_processados),
+        "proxima_varredura_segundos": 180
+    })
+
     return novos_processados
+
+def disparar_item_fila_reserva(wpp_conectado: bool):
+    """Dispara um item da fila de reserva caso os canais estejam em silêncio"""
+    if not os.path.exists(ARQUIVO_FILA):
+        return
+    try:
+        with open(ARQUIVO_FILA, "r", encoding="utf-8") as f:
+            fila = json.load(f)
+        if not fila:
+            return
+            
+        item = fila.pop(0)
+        fila.append(item) # Rotação contínua
+        with open(ARQUIVO_FILA, "w", encoding="utf-8") as f:
+            json.dump(fila, f, indent=2, ensure_ascii=False)
+            
+        titulo = item.get("titulo", "Achadinho Especial da Família")
+        preco = item.get("preco", "Oferta")
+        link = item.get("link_afiliado", "")
+        link_usuario = converter_link_shopee(link)
+        
+        legenda_wpp = (
+            f"🛍️ *{titulo}*\n\n"
+            f"💰 *Por apenas: R$ {preco}*\n"
+            f"🚚 *Benefício:* Cupom de Frete no App\n\n"
+            f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
+            f"⚠️ *Oferta por tempo limitado!*"
+        )
+        legenda_tg = (
+            f"🛍️ <b>{titulo}</b>\n\n"
+            f"💰 <b>Por apenas: R$ {preco}</b>\n"
+            f"🚚 <b>Benefício:</b> Frete Grátis com Cupom\n"
+            f"📡 <b>Radar:</b> Fila de Reserva\n\n"
+            f"🔗 <b>Link Promocional:</b>\n{link_usuario}"
+        )
+        
+        enviar_para_telegram("", legenda_tg)
+        
+        w_st = "Pendente"
+        if wpp_conectado:
+            enviar_para_grupo_whatsapp("", legenda_wpp)
+            w_st = "Enviado"
+            
+        registrar_log_envio(
+            tipo="PRODUTO",
+            titulo=f"{titulo} (R$ {preco})",
+            canal="@Fila_Reserva",
+            wpp_status=w_st,
+            tg_status="Enviado",
+            link=link_usuario
+        )
+        print(f"📦 [FILA RESERVA] Oferta postada: {titulo}")
+    except Exception as e:
+        print(f"Erro ao disparar item da fila reserva: {e}")
 
 if __name__ == "__main__":
     varrer_canais()
