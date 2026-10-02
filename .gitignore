@@ -1,0 +1,11 @@
+sessao_shopee/
+midia/
+stories_instagram/
+input_planilhas/
+__pycache__/
+*.pyc
+*.log
+*.html
+*.bat
+sessao_whatsapp/
+config/sessao_telegram.session
