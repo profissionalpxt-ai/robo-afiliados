@@ -21,8 +21,17 @@ def enviar_para_telegram(caminho_foto: str, texto_legenda: str) -> dict:
     if not token or not chat_id:
         return {"sucesso": False, "erro": "Telegram não configurado (token ou chat_id ausente)"}
         
-    if not os.path.exists(caminho_foto):
-        return {"sucesso": False, "erro": f"Arquivo não encontrado: {caminho_foto}"}
+    if not caminho_foto or not os.path.exists(caminho_foto):
+        url_msg = f"https://api.telegram.org/bot{token}/sendMessage"
+        try:
+            r = requests.post(url_msg, data={"chat_id": chat_id, "text": texto_legenda, "parse_mode": "HTML"}, timeout=20)
+            res = r.json()
+            if res.get("ok"):
+                return {"sucesso": True, "mensagem": "Texto enviado com sucesso!"}
+            else:
+                return {"sucesso": False, "erro": res.get("description")}
+        except Exception as e:
+            return {"sucesso": False, "erro": str(e)}
         
     url_api = f"https://api.telegram.org/bot{token}/sendPhoto"
     

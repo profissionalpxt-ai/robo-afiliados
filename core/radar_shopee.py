@@ -159,8 +159,29 @@ def converter_link_shopee(link_curto: str) -> str:
         sep = "&" if "?" in link_curto else "?"
         return f"{link_curto}{sep}mmp_pid={AFFILIATE_PID}&utm_source={AFFILIATE_PID}&utm_medium=affiliates"
 
+def converter_link_mercadolivre(link: str) -> str:
+    """Converte links do Mercado Livre para o ID de afiliado do Cássio (pai do usuário)"""
+    try:
+        resp = requests.get(link, headers=HEADERS, allow_redirects=True, timeout=12)
+        url_dest = resp.url
+        if 'go=' in url_dest:
+            from urllib.parse import unquote
+            m = url_dest.split('go=')[1].split('&')[0]
+            url_dest = unquote(m)
+            
+        parsed = urlparse(url_dest)
+        qs = parse_qs(parsed.query)
+        qs['matt_tool'] = ['54058478']
+        qs['matt_word'] = ['cassiopeixotomacedo']
+        qs['forceInApp'] = ['true']
+        
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', urlencode(qs, doseq=True), ''))
+    except Exception:
+        sep = "&" if "?" in link else "?"
+        return f"{link}{sep}matt_tool=54058478&matt_word=cassiopeixotomacedo&forceInApp=true"
+
 def varrer_canais() -> list:
-    """Varre todos os 5 canais do Telegram, identifica Cupons e Ofertas, troca links e dispara"""
+    """Varre todos os 5 canais, mantém o texto e foto originais e apenas substitui o link pelo de afiliado"""
     faxina_pastas_temporarias()
     status_radar = carregar_status_radar()
     if not status_radar.get("envios_ativos", True):
@@ -170,7 +191,7 @@ def varrer_canais() -> list:
     vistos = carregar_vistos()
     novos_processados = []
     
-    print("\n📡 [RADAR] Iniciando varredura contínua nos 5 canais da Shopee...")
+    print("\n📡 [RADAR] Iniciando varredura contínua nos 5 canais (Shopee + Mercado Livre)...")
     
     # Verifica se o WhatsApp está pronto para envio
     status_wpp = verificar_conexao_baileys()
@@ -191,35 +212,40 @@ def varrer_canais() -> list:
                 if not post_id or post_id in vistos:
                     continue
                     
-                # Procura links da Shopee especificamente nesta mensagem
+                # Procura links da Shopee e do Mercado Livre na mensagem
                 shopee_links = re.findall(r'https://s\.shopee\.com\.br/[a-zA-Z0-9]+', str(msg)) + re.findall(r'https://shopee\.com\.br/[^\s"\'<>]+', str(msg))
-                if not shopee_links:
+                meli_links = re.findall(r'https://meli\.la/[a-zA-Z0-9]+', str(msg)) + re.findall(r'https://(?:www\.)?mercadolivre\.com\.br/[^\s"\'<>]+', str(msg))
+                
+                if not shopee_links and not meli_links:
                     continue
                     
-                link_concorrente = shopee_links[0]
-                
-                # Extrai texto limpo
+                # Extrai o texto ORIGINAL completo da mensagem
                 div_text = msg.find(class_=re.compile(r'tgme_widget_message_text'))
-                texto_limpo = div_text.get_text(separator=' ').strip() if div_text else ""
-                texto_limpo = html.unescape(texto_limpo)
-                texto_limpo = " ".join(texto_limpo.split())
+                if not div_text:
+                    continue
+                    
+                texto_original = div_text.get_text(separator='\n').strip()
+                texto_original = html.unescape(texto_original)
                 
-                # Identifica se tem preço de produto
-                m_preco = re.search(r'(?:POR|Por apenas|Preço):\s*(?:R\$\s*)?([\d.,]+)', texto_limpo, re.IGNORECASE)
-                if not m_preco:
-                    m_preco = re.search(r'R\$\s*([\d.,]+)', texto_limpo)
-                tem_preco = bool(m_preco)
+                # Substitui apenas os links pelos links de afiliado corretos
+                texto_final = texto_original
+                link_principal = ""
+                
+                # Shopee -> Afiliado do Usuário (an_18316781247)
+                for l_orig in shopee_links:
+                    l_novo = converter_link_shopee(l_orig)
+                    texto_final = texto_final.replace(l_orig, l_novo)
+                    if not link_principal:
+                        link_principal = l_novo
+                        
+                # Mercado Livre -> Afiliado do Cássio (54058478 / cassiopeixotomacedo)
+                for l_orig in meli_links:
+                    l_novo = converter_link_mercadolivre(l_orig)
+                    texto_final = texto_final.replace(l_orig, l_novo)
+                    if not link_principal:
+                        link_principal = l_novo
 
-                # É cupom se não tiver preço e mencionar cupom
-                e_cupom = bool(
-                    (canal == "shopeebrcupom" or "código" in texto_limpo.lower() or "cupom:" in texto_limpo.lower()) 
-                    and not tem_preco
-                )
-                
-                # Converte o link para o código do usuário (link curto e limpo)
-                link_afiliado_usuario = converter_link_shopee(link_concorrente)
-                
-                # Extrai foto do produto na mensagem (ignora fotos de perfil)
+                # Extrai a FOTO ORIGINAL exata do produto postado
                 foto_div = msg.find(class_=re.compile(r'tgme_widget_message_photo_wrap'))
                 foto_url = ""
                 if foto_div and 'style' in foto_div.attrs:
@@ -236,145 +262,46 @@ def varrer_canais() -> list:
                             with open(caminho_foto_local, "wb") as f_img:
                                 f_img.write(r_foto.content)
                     except Exception as e:
-                        print(f"   ⚠️ Falha ao baixar foto: {e}")
+                        print(f"   ⚠️ Falha ao baixar foto original: {e}")
 
-                # ----------------------------------------------------
-                # CASO 1: CUPOM RELÂMPAGO
-                # ----------------------------------------------------
-                if e_cupom:
-                    m_cod = re.search(r'(?:Cupom|CUPOM):\s*([A-Za-z0-9_-]+)', texto_limpo)
-                    codigo_cupom = m_cod.group(1).strip() if m_cod else "VERIFIQUE_NO_LINK"
-                    
-                    m_desc = re.search(r'(R\$\s*[\d.,]+\s*OFF[^\n.!?]*)', texto_limpo, re.IGNORECASE)
-                    regra_desconto = m_desc.group(1).strip() if m_desc else "Desconto Especial Liberado!"
-                    
-                    print(f"\n🎟️ [CUPOM NOVO DETECTADO @{canal}]: {regra_desconto} | Código: {codigo_cupom}")
-                    
-                    legenda_tg = (
-                        f"🚨 <b>CUPOM RELÂMPAGO SHOPEE!</b> 🎟️\n\n"
-                        f"🏷️ <b>Desconto:</b> {regra_desconto}\n"
-                        f"🔑 <b>Código:</b> <code>{codigo_cupom}</code> <i>(Toque para copiar)</i>\n"
-                        f"📡 <b>Radar:</b> @{canal}\n\n"
-                        f"🛒 <b>Resgate o Cupom Antes que Esgote:</b>\n{link_afiliado_usuario}\n\n"
-                        f"⚠️ <i>Cupons Shopee possuem limite de uso, corra!</i>"
-                    )
-                    
-                    legenda_wpp = (
-                        f"🚨 *CUPOM RELÂMPAGO SHOPEE!* 🎟️\n\n"
-                        f"🏷️ *Desconto:* {regra_desconto}\n"
-                        f"🔑 *Código:* `{codigo_cupom}`\n\n"
-                        f"🛒 *Resgate o cupom antes que esgote:*\n{link_afiliado_usuario}\n\n"
-                        f"⚠️ *Corra que os cupons acabam rápido!*"
-                    )
-                    
-                    caminho_story = os.path.join(PASTA_STORIES, f"story_cupom_{post_id.replace('/', '_')}.png")
-                    criar_story_9_16(
-                        caminho_foto_produto=caminho_foto_local,
-                        titulo=f"CUPOM {regra_desconto}",
-                        preco=codigo_cupom,
-                        preco_antigo="",
-                        cupom="Ative no App da Shopee",
-                        caminho_saida=caminho_story
-                    )
-                        
-                    if os.path.exists(caminho_story):
-                        enviar_para_telegram(caminho_story, legenda_tg)
-                    
-                    w_st = "Pendente"
-                    if wpp_conectado:
-                        foto_envio = caminho_foto_local if os.path.exists(caminho_foto_local) else caminho_story
-                        enviar_para_grupo_whatsapp(foto_envio, legenda_wpp)
-                        w_st = "Enviado"
-                        print(f"   📲 Cupom enviado ao Grupo do WhatsApp!")
+                # Identifica título e tipo para o log
+                e_cupom = "cupom" in texto_original.lower() or canal == "shopeebrcupom"
+                primeira_linha = texto_original.split('\n')[0].strip()
+                titulo_log = primeira_linha[:55] if len(primeira_linha) > 5 else "Oferta Especial"
+                
+                print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom else 'OFERTA' } @{canal}]: {titulo_log}")
+                
+                # Dispara no Telegram (com a foto original ou texto)
+                enviar_para_telegram(caminho_foto_local, texto_final)
+                
+                # Dispara no WhatsApp (com a foto original ou texto)
+                w_st = "Pendente"
+                if wpp_conectado:
+                    enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
+                    w_st = "Enviado"
+                    print(f"   📲 Oferta enviada ao Grupo do WhatsApp com foto original e texto completo!")
 
-                    registrar_log_envio(
-                        tipo="CUPOM",
-                        titulo=f"CUPOM {regra_desconto} ({codigo_cupom})",
-                        canal=canal,
-                        wpp_status=w_st,
-                        tg_status="Enviado",
-                        link=link_afiliado_usuario
-                    )
+                # Registra no log ao vivo
+                registrar_log_envio(
+                    tipo="CUPOM" if e_cupom else "PRODUTO",
+                    titulo=titulo_log,
+                    canal=canal,
+                    wpp_status=w_st,
+                    tg_status="Enviado",
+                    link=link_principal
+                )
 
-                    limpar_arquivos_temporarios([caminho_foto_local, caminho_story])
+                # Salva na fila de reserva para repetições futuras
+                if foto_url:
+                    salvar_oferta_na_fila({
+                        "titulo": titulo_log,
+                        "texto": texto_final,
+                        "link_afiliado": link_principal,
+                        "foto_url": foto_url,
+                        "canal": canal
+                    })
 
-                # ----------------------------------------------------
-                # CASO 2: OFERTA DE PRODUTO
-                # ----------------------------------------------------
-                else:
-                    primeira_linha = texto_limpo.split("POR:")[0].split("Por apenas")[0].split("De:")[0].split("R$")[0].strip()
-                    titulo = re.sub(r'^[^\w\s]+', '', primeira_linha).strip()
-                    if len(titulo) > 55:
-                        titulo = titulo[:55].rsplit(" ", 1)[0]
-                    if len(titulo) < 5:
-                        titulo = "Achadinho Especial Shopee"
-                        
-                    if m_preco:
-                        preco_num = m_preco.group(1).replace(".", "").replace(",", ".")
-                        try:
-                            preco = f"{float(preco_num):.2f}".replace(".", ",")
-                        except Exception:
-                            preco = m_preco.group(1)
-                    else:
-                        preco = "Confira no Link"
-                        
-                    print(f"\n🛍️ [PRODUTO NOVO DETECTADO @{canal}]: {titulo} (R$ {preco})")
-                    
-                    caminho_story = os.path.join(PASTA_STORIES, f"story_radar_{post_id.replace('/', '_')}.png")
-                    criar_story_9_16(
-                        caminho_foto_produto=caminho_foto_local,
-                        titulo=titulo,
-                        preco=preco,
-                        preco_antigo="",
-                        cupom="Cupom de Frete no App",
-                        caminho_saida=caminho_story
-                    )
-                        
-                    legenda_tg = (
-                        f"🛍️ <b>{titulo}</b>\n\n"
-                        f"💰 <b>Por apenas: R$ {preco}</b>\n"
-                        f"🚚 <b>Benefício:</b> Frete Grátis com Cupom\n"
-                        f"📡 <b>Radar:</b> @{canal}\n\n"
-                        f"🔗 <b>Link Promocional (Toque e Copie):</b>\n{link_afiliado_usuario}"
-                    )
-                    
-                    legenda_wpp = (
-                        f"🛍️ *{titulo}*\n\n"
-                        f"💰 *Por apenas: R$ {preco}*\n"
-                        f"🚚 *Benefício:* Cupom de Frete no App\n\n"
-                        f"🛒 *Compre com segurança aqui:*\n{link_afiliado_usuario}\n\n"
-                        f"⚠️ *Oferta por tempo limitado!*"
-                    )
-                    
-                    if os.path.exists(caminho_story):
-                        enviar_para_telegram(caminho_story, legenda_tg)
-                        
-                    w_st = "Pendente"
-                    if wpp_conectado:
-                        foto_envio = caminho_foto_local if os.path.exists(caminho_foto_local) else caminho_story
-                        enviar_para_grupo_whatsapp(foto_envio, legenda_wpp)
-                        w_st = "Enviado"
-                        print(f"   📲 Oferta enviada ao Grupo do WhatsApp!")
-
-                    registrar_log_envio(
-                        tipo="PRODUTO",
-                        titulo=f"{titulo} (R$ {preco})",
-                        canal=canal,
-                        wpp_status=w_st,
-                        tg_status="Enviado",
-                        link=link_afiliado_usuario
-                    )
-
-                    if foto_url and tem_preco:
-                        salvar_oferta_na_fila({
-                            "titulo": titulo,
-                            "preco": preco,
-                            "link_afiliado": link_afiliado_usuario,
-                            "foto_url": foto_url,
-                            "canal": canal
-                        })
-
-                    limpar_arquivos_temporarios([caminho_foto_local, caminho_story])
+                limpar_arquivos_temporarios([caminho_foto_local])
 
                 vistos.add(post_id)
                 novos_processados.append({
@@ -383,7 +310,7 @@ def varrer_canais() -> list:
                     "tipo": "cupom" if e_cupom else "produto",
                     "timestamp": int(time.time())
                 })
-                # Processa 1 item por ciclo para manter cadência perfeita
+                # Processa 1 item por ciclo para respeitar a cadência de 3 a 5 min
                 break
                 
             if novos_processados:
@@ -404,9 +331,9 @@ def varrer_canais() -> list:
         except Exception:
             pass
 
-    # Se nenhum canal postou nada novo, dispara imediatamente da fila de reserva!
+    # Se nenhum canal postou nada novo, dispara 1 item da fila de reserva!
     if len(novos_processados) == 0 and total_fila > 0:
-        print("📦 [FILA RESERVA] Canais sem novidades neste ciclo. Disparando 1 item da fila com foto...")
+        print("📦 [FILA RESERVA] Canais sem novidades neste ciclo. Disparando 1 item da fila com foto original...")
         disparar_item_fila_reserva(wpp_conectado)
 
     # Cadência dinâmica: 180s (3 min) se fila > 10; 300s (5 min) se <= 10
@@ -490,42 +417,34 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
             caminho_saida=caminho_story
         )
         
-        foto_envio = caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else (caminho_story if os.path.exists(caminho_story) else "")
+        foto_envio = caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else ""
         
-        legenda_wpp = (
-            f"🛍️ *{titulo}*\n\n"
-            f"💰 *Por apenas: R$ {preco}*\n"
-            f"🚚 *Benefício:* Cupom de Frete no App\n\n"
-            f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
-            f"⚠️ *Oferta por tempo limitado!*"
-        )
-        legenda_tg = (
-            f"🛍️ <b>{titulo}</b>\n\n"
-            f"💰 <b>Por apenas: R$ {preco}</b>\n"
-            f"🚚 <b>Benefício:</b> Frete Grátis com Cupom\n"
-            f"📡 <b>Radar:</b> Fila de Reserva\n\n"
-            f"🔗 <b>Link Promocional:</b>\n{link_usuario}"
-        )
+        texto_envio = item.get("texto", "")
+        if not texto_envio:
+            texto_envio = (
+                f"🛍️ *{titulo}*\n\n"
+                f"💰 *Por apenas: R$ {preco}*\n"
+                f"🚚 *Benefício:* Cupom de Frete no App\n\n"
+                f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
+                f"⚠️ *Oferta por tempo limitado!*"
+            )
         
-        if foto_envio:
-            enviar_para_telegram(foto_envio, legenda_tg)
-        else:
-            enviar_para_telegram("", legenda_tg)
+        enviar_para_telegram(foto_envio, texto_envio)
         
         w_st = "Pendente"
         if wpp_conectado:
-            enviar_para_grupo_whatsapp(foto_envio, legenda_wpp)
+            enviar_para_grupo_whatsapp(foto_envio, texto_envio)
             w_st = "Enviado"
             
         registrar_log_envio(
             tipo="PRODUTO",
-            titulo=f"{titulo} (R$ {preco})",
+            titulo=titulo,
             canal="@Fila_Reserva",
             wpp_status=w_st,
             tg_status="Enviado",
             link=link_usuario
         )
-        print(f"📦 [FILA RESERVA] Oferta postada com foto real: {titulo}")
+        print(f"📦 [FILA RESERVA] Oferta postada com foto real e texto original: {titulo}")
         
         limpar_arquivos_temporarios([caminho_foto_local, caminho_story])
     except Exception as e:
