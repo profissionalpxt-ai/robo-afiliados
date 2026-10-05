@@ -222,6 +222,16 @@ def api_logs():
             pass
     return jsonify({"logs": [], "total": 0})
 
+@app.route("/api/limpar-logs", methods=["GET", "POST"])
+def api_limpar_logs():
+    historico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "historico_envios.json")
+    try:
+        with open(historico_path, "w", encoding="utf-8") as f:
+            json.dump([], f)
+        return jsonify({"status": "sucesso", "mensagem": "Histórico de logs limpo!"}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
 @app.route("/api/status-radar")
 def api_status_radar():
     total_fila = 0
@@ -466,11 +476,19 @@ HTML_WHATSAPP = """
         <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
             <button id="btn-toggle-envios" onclick="toggleEnvios()" class="btn btn-pause">⏸️ Pausar Envios</button>
             <a href="/varrer-agora" class="btn" style="background: #ff9800;">🚀 Forçar Disparo Agora</a>
+            <button onclick="limparHistoricoLogs()" class="btn" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);">🗑️ Limpar Logs</button>
         </div>
     </div>
 
     <script>
         let enviosAtivos = true;
+
+        async function limparHistoricoLogs() {
+            if (confirm("Deseja realmente limpar o feed de logs antigos?")) {
+                await fetch('/api/limpar-logs', { method: 'POST' });
+                carregarLogs();
+            }
+        }
 
         async function toggleEnvios() {
             const btn = document.getElementById('btn-toggle-envios');

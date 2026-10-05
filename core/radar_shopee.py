@@ -271,52 +271,69 @@ def varrer_canais() -> list:
                         print(f"   ⚠️ Falha ao baixar ou validar foto original: {e}")
                         caminho_foto_local = ""
 
-                # Identifica título e tipo para o log
+                # Identifica se é CUPOM ou PRODUTO
                 e_cupom = "cupom" in texto_original.lower() or canal == "shopeebrcupom"
                 primeira_linha = texto_original.split('\n')[0].strip()
                 titulo_log = primeira_linha[:55] if len(primeira_linha) > 5 else "Oferta Especial"
                 
-                print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom else 'OFERTA' } @{canal}]: {titulo_log}")
+                print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom else 'PRODUTO' } @{canal}]: {titulo_log}")
                 
-                # Gera o Story 9:16 Oficial da Família (com Logo, Confetes e espaço demarcado para o Link do Instagram)
-                caminho_story_telegram = ""
-                try:
-                    # Extrai preço do texto se disponível
-                    m_preco = re.search(r'(?:R\$|POR:?\s*R\$)\s*([\d\.,]+)', texto_original, re.IGNORECASE)
-                    preco_extraido = m_preco.group(1) if m_preco else ""
-                    m_de = re.search(r'DE:?\s*R\$\s*([\d\.,]+)', texto_original, re.IGNORECASE)
-                    preco_de_extraido = m_de.group(1) if m_de else ""
-                    m_cupom = re.search(r'cupom:?\s*([A-Za-z0-9_-]+)', texto_original, re.IGNORECASE)
-                    cupom_extraido = m_cupom.group(1) if m_cupom else ""
-
-                    caminho_story = os.path.join(PASTA_STORIES, f"story_{post_id.replace('/', '_')}.png")
-                    caminho_story_telegram = criar_story_9_16(
-                        caminho_foto_produto=caminho_foto_local,
-                        titulo=titulo_log,
-                        preco=preco_extraido if preco_extraido else "Oferta",
-                        preco_antigo=preco_de_extraido,
-                        cupom=cupom_extraido,
-                        caminho_saida=caminho_story
-                    )
-                except Exception as err_story:
-                    print(f"   ⚠️ Aviso ao gerar Story 9:16: {err_story}")
-                    caminho_story_telegram = caminho_foto_local
-
-                # Dispara no Telegram: Story 9:16 oficial com Logo da Família pronto para o Instagram
-                foto_telegram = caminho_story_telegram if (caminho_story_telegram and os.path.exists(caminho_story_telegram)) else caminho_foto_local
-                enviar_para_telegram(foto_telegram, texto_final)
+                # REGRAS ESPECÍFICAS DE CANAL:
+                # 1. CUPOM: NÃO gera Story 9:16 nem vai com imagem para o Telegram (Instagram não posta cupons sem item)
+                #    Envia apenas o texto limpo com link para o WhatsApp.
+                # 2. PRODUTO COM FOTO: Gera o Story 9:16 Oficial da Família para o Telegram (para Instagram Stories com espaço de link)
+                #    e envia a foto original real com texto para o WhatsApp.
                 
-                # Dispara no WhatsApp: Foto original real do produto + Mensagem formatada completa
+                tg_st = "Ignorado (Cupom)"
                 w_st = "Pendente"
-                if wpp_conectado:
-                    res_w = enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
-                    print(f"👉 RESPOSTA BAILEYS: {res_w}")
-                    if res_w.get("sucesso") is True:
-                        w_st = "Enviado"
-                        print(f"   📲 Oferta enviada ao Grupo do WhatsApp com sucesso!")
-                    else:
-                        w_st = f"Erro ({res_w.get('erro', 'Falha')})"
-                        print(f"   ⚠️ Falha ao enviar para WhatsApp: {res_w}")
+                
+                if e_cupom:
+                    # Envia no WhatsApp apenas o texto oficial do cupom com o link
+                    if wpp_conectado:
+                        res_w = enviar_para_grupo_whatsapp("", texto_final)
+                        print(f"👉 RESPOSTA BAILEYS CUPOM: {res_w}")
+                        if res_w.get("sucesso") is True:
+                            w_st = "Enviado"
+                        else:
+                            w_st = f"Erro ({res_w.get('erro', 'Falha')})"
+                else:
+                    # PRODUTO: Gera o Story 9:16 Oficial com a Logo da Família para o Telegram
+                    caminho_story_telegram = ""
+                    try:
+                        m_preco = re.search(r'(?:R\$|POR:?\s*R\$)\s*([\d\.,]+)', texto_original, re.IGNORECASE)
+                        preco_extraido = m_preco.group(1) if m_preco else ""
+                        m_de = re.search(r'DE:?\s*R\$\s*([\d\.,]+)', texto_original, re.IGNORECASE)
+                        preco_de_extraido = m_de.group(1) if m_de else ""
+                        m_cupom = re.search(r'cupom:?\s*([A-Za-z0-9_-]+)', texto_original, re.IGNORECASE)
+                        cupom_extraido = m_cupom.group(1) if m_cupom else ""
+
+                        caminho_story = os.path.join(PASTA_STORIES, f"story_{post_id.replace('/', '_')}.png")
+                        caminho_story_telegram = criar_story_9_16(
+                            caminho_foto_produto=caminho_foto_local,
+                            titulo=titulo_log,
+                            preco=preco_extraido if preco_extraido else "Oferta",
+                            preco_antigo=preco_de_extraido,
+                            cupom=cupom_extraido,
+                            caminho_saida=caminho_story
+                        )
+                    except Exception as err_story:
+                        print(f"   ⚠️ Aviso ao gerar Story 9:16: {err_story}")
+                        caminho_story_telegram = caminho_foto_local
+
+                    foto_telegram = caminho_story_telegram if (caminho_story_telegram and os.path.exists(caminho_story_telegram)) else caminho_foto_local
+                    res_tg = enviar_para_telegram(foto_telegram, texto_final)
+                    tg_st = "Enviado" if res_tg.get("sucesso") else "Erro"
+
+                    # Dispara no WhatsApp: Foto original real do produto + Mensagem formatada
+                    if wpp_conectado:
+                        res_w = enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
+                        print(f"👉 RESPOSTA BAILEYS: {res_w}")
+                        if res_w.get("sucesso") is True:
+                            w_st = "Enviado"
+                            print(f"   📲 Oferta enviada ao Grupo do WhatsApp com sucesso!")
+                        else:
+                            w_st = f"Erro ({res_w.get('erro', 'Falha')})"
+                            print(f"   ⚠️ Falha ao enviar para WhatsApp: {res_w}")
 
                 # Registra no log ao vivo
                 registrar_log_envio(
@@ -447,42 +464,45 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
                 print(f"   ⚠️ Imagem da fila de reserva inválida: {e}")
                 caminho_foto_local = ""
                 
-        # Gera Story Oficial 9:16 com a Logo da Família
-        caminho_story = os.path.join(PASTA_STORIES, f"story_reserva_{int(time.time())}.png")
-        caminho_story_pronto = criar_story_9_16(
-            caminho_foto_produto=caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else "",
-            titulo=titulo,
-            preco=preco,
-            preco_antigo=preco_antigo,
-            cupom=cupom,
-            condicao=condicao,
-            caminho_saida=caminho_story
-        )
+        # Identifica se é CUPOM ou PRODUTO na fila
+        e_cupom = "cupom" in texto_envio.lower() or item.get("canal") == "shopeebrcupom"
         
         foto_envio_wpp = caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else ""
-        foto_envio_tg = caminho_story_pronto if (caminho_story_pronto and os.path.exists(caminho_story_pronto)) else foto_envio_wpp
-        
-        texto_envio = item.get("texto", "")
-        if not texto_envio:
-            texto_envio = (
-                f"🛍️ *{titulo}*\n\n"
-                f"💰 *Por apenas: R$ {preco}*\n"
-                f"🚚 *Benefício:* Cupom de Frete no App\n\n"
-                f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
-                f"⚠️ *Oferta por tempo limitado!*"
-            )
-        
-        # Telegram recebe o Story 9:16 com a Logo da Família
-        enviar_para_telegram(foto_envio_tg, texto_envio)
-        
+        tg_st = "Ignorado (Cupom)"
         w_st = "Pendente"
-        if wpp_conectado:
-            res_w = enviar_para_grupo_whatsapp(foto_envio_wpp, texto_envio)
-            print(f"👉 RESPOSTA BAILEYS FILA: {res_w}")
-            if res_w.get("sucesso") is True:
-                w_st = "Enviado"
-            else:
-                w_st = f"Erro ({res_w.get('erro', 'Falha')})"
+
+        if e_cupom:
+            # Cupom: apenas texto no WhatsApp, sem foto no Telegram
+            if wpp_conectado:
+                res_w = enviar_para_grupo_whatsapp("", texto_envio)
+                print(f"👉 RESPOSTA BAILEYS FILA CUPOM: {res_w}")
+                if res_w.get("sucesso") is True:
+                    w_st = "Enviado"
+                else:
+                    w_st = f"Erro ({res_w.get('erro', 'Falha')})"
+        else:
+            # Produto: gera Story Oficial 9:16 com a Logo da Família para o Telegram
+            caminho_story = os.path.join(PASTA_STORIES, f"story_reserva_{int(time.time())}.png")
+            caminho_story_pronto = criar_story_9_16(
+                caminho_foto_produto=caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else "",
+                titulo=titulo,
+                preco=preco,
+                preco_antigo=preco_antigo,
+                cupom=cupom,
+                condicao=condicao,
+                caminho_saida=caminho_story
+            )
+            foto_envio_tg = caminho_story_pronto if (caminho_story_pronto and os.path.exists(caminho_story_pronto)) else foto_envio_wpp
+            res_tg = enviar_para_telegram(foto_envio_tg, texto_envio)
+            tg_st = "Enviado" if res_tg.get("sucesso") else "Erro"
+
+            if wpp_conectado:
+                res_w = enviar_para_grupo_whatsapp(foto_envio_wpp, texto_envio)
+                print(f"👉 RESPOSTA BAILEYS FILA: {res_w}")
+                if res_w.get("sucesso") is True:
+                    w_st = "Enviado"
+                else:
+                    w_st = f"Erro ({res_w.get('erro', 'Falha')})"
             
         registrar_log_envio(
             tipo="PRODUTO",
