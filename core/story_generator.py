@@ -59,24 +59,24 @@ def criar_story_9_16(
         font_titulo = font_de = font_por_label = font_por_preco = font_cupom = font_aviso = ImageFont.load_default()
 
     # 1. TÍTULO DO PRODUTO (Topo do card branco)
-    # Caixa de texto entre y=405 e y=520
+    # Caixa de texto entre y=385 e y=520
     palavras = titulo.split()
     linha1, linha2 = [], []
     for p in palavras:
-        if len(" ".join(linha1 + [p])) <= 25 and not linha2:
+        if len(" ".join(linha1 + [p])) <= 24 and not linha2:
             linha1.append(p)
-        elif len(" ".join(linha2 + [p])) <= 25:
+        elif len(" ".join(linha2 + [p])) <= 24:
             linha2.append(p)
             
     txt_l1 = " ".join(linha1)
     txt_l2 = " ".join(linha2) if linha2 else ""
     
-    y_titulo = 410
+    y_titulo = 395
     bbox1 = draw.textbbox((0, 0), txt_l1, font=font_titulo)
     draw.text(((largura - (bbox1[2] - bbox1[0])) // 2, y_titulo), txt_l1, font=font_titulo, fill=(18, 18, 20, 255))
     
     if txt_l2:
-        y_titulo += 55
+        y_titulo += 58
         bbox2 = draw.textbbox((0, 0), txt_l2, font=font_titulo)
         draw.text(((largura - (bbox2[2] - bbox2[0])) // 2, y_titulo), txt_l2, font=font_titulo, fill=(18, 18, 20, 255))
 

@@ -109,13 +109,13 @@ def faxina_pastas_temporarias():
                         pass
     gc.collect()
 
-# Os 5 Canais de Ouro Monitorados
+# Os 5 Canais Monitorados (PRODUTOS COM FOTO NO TOPO, CUPOM EM ÚLTIMO)
 CANAIS_RADAR = [
-    "shopeebrcupom",         # Cupons oficiais, R$ 15/R$ 50 OFF e frete grátis
-    "casaricadeoracao",      # Achadinhos para casa e cozinha
-    "escolhasegura",         # Eletrônicos, gadgets e utilidades
-    "Automa_Web_Ofertas_01", # Ofertas variadas e tecnologia
-    "ofertasgamerandre"      # Acessórios, fones e setup
+    "casaricadeoracao",      # Achadinhos para casa e cozinha (MUITOS PRODUTOS COM FOTO)
+    "escolhasegura",         # Eletrônicos, gadgets e utilidades (MUITOS PRODUTOS COM FOTO)
+    "Automa_Web_Ofertas_01", # Ofertas variadas e tecnologia (PRODUTOS COM FOTO)
+    "ofertasgamerandre",     # Acessórios, fones e setup (PRODUTOS COM FOTO)
+    "shopeebrcupom"          # Cupons oficiais (APENAS EM ÚLTIMO CASO SE NÃO HOUVER PRODUTO)
 ]
 
 AFFILIATE_PID = "an_18316781247"
@@ -123,6 +123,24 @@ AFFILIATE_PID = "an_18316781247"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 }
+
+def extrair_titulo_produto(texto: str) -> str:
+    """Extrai com precisão cirúrgica o nome real do produto sem emojis ou tags"""
+    for linha in texto.split('\n'):
+        linha = linha.strip()
+        if not linha:
+            continue
+        # Ignora linhas só com emojis
+        if re.match(r'^[^\w\s]*$', linha):
+            continue
+        # Ignora palavras de cabeçalho ou tags promocionais
+        if any(linha.lower().startswith(x) for x in ['achadinho', 'confira', 'cupom', 'de:', 'por:', 'use o', 'resgate', 'link', 'compre', '#', 'oferta', 'alerta', 'total']):
+            continue
+        # Remove emojis do início da linha se houver
+        linha_limpa = re.sub(r'^[^\w\s]+', '', linha).strip()
+        if len(linha_limpa) >= 5:
+            return linha_limpa[:55]
+    return "Achadinho da Família"
 
 def carregar_vistos() -> set:
     if os.path.exists(ARQUIVO_VISTOS):
@@ -273,8 +291,7 @@ def varrer_canais() -> list:
 
                 # Identifica se é CUPOM ou PRODUTO
                 e_cupom = "cupom" in texto_original.lower() or canal == "shopeebrcupom"
-                primeira_linha = texto_original.split('\n')[0].strip()
-                titulo_log = primeira_linha[:55] if len(primeira_linha) > 5 else "Oferta Especial"
+                titulo_log = extrair_titulo_produto(texto_original) if not e_cupom else "Cupom Promocional Shopee"
                 
                 print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom else 'PRODUTO' } @{canal}]: {titulo_log}")
                 
@@ -463,7 +480,21 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
             except Exception as e:
                 print(f"   ⚠️ Imagem da fila de reserva inválida: {e}")
                 caminho_foto_local = ""
-                
+
+        texto_envio = item.get("texto", "")
+        if not texto_envio:
+            texto_envio = (
+                f"🛍️ *{titulo}*\n\n"
+                f"💰 *Por apenas: R$ {preco}*\n"
+                f"🚚 *Benefício:* Cupom de Frete no App\n\n"
+                f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
+                f"⚠️ *Oferta por tempo limitado!*"
+            )
+
+        # Garante título real e preciso
+        if not titulo or titulo in ["Oferta Especial", "Achadinho Especial da Família"]:
+            titulo = extrair_titulo_produto(texto_envio)
+
         # Identifica se é CUPOM ou PRODUTO na fila
         e_cupom = "cupom" in texto_envio.lower() or item.get("canal") == "shopeebrcupom"
         
