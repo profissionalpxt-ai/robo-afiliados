@@ -200,6 +200,27 @@ def whatsapp_status():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
+@app.route("/api/desconectar-whatsapp", methods=["GET", "POST"])
+def api_desconectar_whatsapp():
+    """Desconecta o WhatsApp e força a geração de um novo QR Code"""
+    try:
+        import shutil
+        # Tenta avisar o Baileys local na porta 3333
+        try:
+            requests.post("http://127.0.0.1:3333/desconectar", timeout=5)
+        except Exception:
+            pass
+
+        # Garante limpeza da pasta de autenticação
+        pasta_auth = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp_baileys", "auth_info_baileys")
+        if os.path.exists(pasta_auth):
+            shutil.rmtree(pasta_auth, ignore_errors=True)
+            os.makedirs(pasta_auth, exist_ok=True)
+
+        return jsonify({"status": "sucesso", "mensagem": "WhatsApp desconectado com sucesso! Gerando novo QR Code..."}), 200
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
 @app.route("/limpar-cache")
 def limpar_cache():
     try:
@@ -558,6 +579,11 @@ HTML_WHATSAPP = """
                             <h3 style="margin: 10px 0 4px 0; color: #a5d6a7; font-size: 16px;">Aparelho Ativo na Nuvem!</h3>
                             <p style="margin: 2px 0; font-size: 13px;">Dispositivo: <b>Achadinhos da Família</b></p>
                             <p style="margin: 2px 0; font-size: 13px;">Grupo Alvo: <b>${st.jidGrupo || 'Achadiinhos da Família'}</b></p>
+                            <div style="margin-top: 12px;">
+                                <button onclick="desconectarWhatsApp()" class="btn" style="background: #d32f2f; color: #fff; padding: 6px 14px; font-size: 12px; border-radius: 6px;">
+                                    🔴 Desconectar / Reconectar WhatsApp
+                                </button>
+                            </div>
                         </div>
                     `;
                 } else if (st.qr) {
@@ -569,17 +595,40 @@ HTML_WHATSAPP = """
                                 <img src="${qrUrl}" alt="QR Code WhatsApp" width="240" height="240" />
                             </div>
                             <p style="font-size: 13px; color: #ffb74d;">Abra o WhatsApp > Aparelhos Conectados > Conectar um Aparelho</p>
+                            <div style="margin-top: 8px;">
+                                <button onclick="desconectarWhatsApp()" class="btn" style="background: rgba(255,255,255,0.1); color: #fff; padding: 5px 10px; font-size: 11px;">
+                                    🔄 Gerar Novo QR Code
+                                </button>
+                            </div>
                         </div>
                     `;
                 } else {
                     box.innerHTML = `
                         <div class="card-status">
                             <p>⏳ O conector Baileys está iniciando ou gerando o QR Code...</p>
+                            <div style="margin-top: 8px;">
+                                <button onclick="desconectarWhatsApp()" class="btn" style="background: rgba(255,255,255,0.1); color: #fff; padding: 5px 10px; font-size: 11px;">
+                                    🔄 Forçar Reinício do QR Code
+                                </button>
+                            </div>
                         </div>
                     `;
                 }
             } catch (err) {
                 console.error(err);
+            }
+        }
+
+        async function desconectarWhatsApp() {
+            if (confirm("Deseja realmente desconectar a sessão do WhatsApp e gerar um novo QR Code?")) {
+                const box = document.getElementById('status-card-box');
+                box.innerHTML = '<div class="card-status"><p>⏳ Desconectando e gerando novo QR Code...</p></div>';
+                try {
+                    await fetch('/api/desconectar-whatsapp', { method: 'POST' });
+                    setTimeout(checarStatus, 2000);
+                } catch (e) {
+                    alert("Erro ao solicitar desconexão: " + e);
+                }
             }
         }
 

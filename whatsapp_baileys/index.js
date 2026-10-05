@@ -170,6 +170,36 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (req.method === 'POST' && req.url === '/desconectar') {
+        try {
+            console.log("🛑 [BAILEYS] Solicitação de desconexão recebida. Limpando credenciais...");
+            estaConectado = false;
+            ultimoQr = null;
+            if (sock) {
+                try {
+                    sock.logout();
+                } catch (e) {}
+            }
+            // Limpa os arquivos de autenticação do cofre
+            if (fs.existsSync(PASTA_COFRE)) {
+                fs.rmSync(PASTA_COFRE, { recursive: true, force: true });
+                fs.mkdirSync(PASTA_COFRE, { recursive: true });
+            }
+            res.writeHead(200);
+            res.end(JSON.stringify({ sucesso: true, mensagem: 'WhatsApp desconectado. Gerando novo QR Code...' }));
+
+            // Reinicia o bot em 2 segundos para gerar novo QR Code
+            setTimeout(() => {
+                iniciarBotWhatsApp();
+            }, 2000);
+            return;
+        } catch (err) {
+            console.error("Erro ao desconectar:", err);
+            res.writeHead(500);
+            return res.end(JSON.stringify({ sucesso: false, erro: err.message }));
+        }
+    }
+
     res.writeHead(404);
     res.end(JSON.stringify({ erro: 'Não encontrado' }));
 });
