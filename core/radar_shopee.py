@@ -256,13 +256,20 @@ def varrer_canais() -> list:
                 caminho_foto_local = ""
                 if foto_url and foto_url.startswith("http") and "emoji" not in foto_url:
                     try:
-                        r_foto = requests.get(foto_url, timeout=15)
-                        if len(r_foto.content) > 5000:
+                        r_foto = requests.get(foto_url, headers=HEADERS, timeout=15)
+                        if len(r_foto.content) > 3000:
+                            # Valida se os bytes são realmente de uma imagem válida
+                            from PIL import Image
+                            import io
+                            test_img = Image.open(io.BytesIO(r_foto.content))
+                            test_img.verify()
+                            
                             caminho_foto_local = os.path.join(PASTA_MIDIA, f"radar_{post_id.replace('/', '_')}.jpg")
                             with open(caminho_foto_local, "wb") as f_img:
                                 f_img.write(r_foto.content)
                     except Exception as e:
-                        print(f"   ⚠️ Falha ao baixar foto original: {e}")
+                        print(f"   ⚠️ Falha ao baixar ou validar foto original: {e}")
+                        caminho_foto_local = ""
 
                 # Identifica título e tipo para o log
                 e_cupom = "cupom" in texto_original.lower() or canal == "shopeebrcupom"
@@ -271,10 +278,35 @@ def varrer_canais() -> list:
                 
                 print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom else 'OFERTA' } @{canal}]: {titulo_log}")
                 
-                # Dispara no Telegram (com a foto original ou texto)
-                enviar_para_telegram(caminho_foto_local, texto_final)
+                # Gera o Story 9:16 Oficial da Família (com Logo, Confetes e espaço demarcado para o Link do Instagram)
+                caminho_story_telegram = ""
+                try:
+                    # Extrai preço do texto se disponível
+                    m_preco = re.search(r'(?:R\$|POR:?\s*R\$)\s*([\d\.,]+)', texto_original, re.IGNORECASE)
+                    preco_extraido = m_preco.group(1) if m_preco else ""
+                    m_de = re.search(r'DE:?\s*R\$\s*([\d\.,]+)', texto_original, re.IGNORECASE)
+                    preco_de_extraido = m_de.group(1) if m_de else ""
+                    m_cupom = re.search(r'cupom:?\s*([A-Za-z0-9_-]+)', texto_original, re.IGNORECASE)
+                    cupom_extraido = m_cupom.group(1) if m_cupom else ""
+
+                    caminho_story = os.path.join(PASTA_STORIES, f"story_{post_id.replace('/', '_')}.png")
+                    caminho_story_telegram = criar_story_9_16(
+                        caminho_foto_produto=caminho_foto_local,
+                        titulo=titulo_log,
+                        preco=preco_extraido if preco_extraido else "Oferta",
+                        preco_antigo=preco_de_extraido,
+                        cupom=cupom_extraido,
+                        caminho_saida=caminho_story
+                    )
+                except Exception as err_story:
+                    print(f"   ⚠️ Aviso ao gerar Story 9:16: {err_story}")
+                    caminho_story_telegram = caminho_foto_local
+
+                # Dispara no Telegram: Story 9:16 oficial com Logo da Família pronto para o Instagram
+                foto_telegram = caminho_story_telegram if (caminho_story_telegram and os.path.exists(caminho_story_telegram)) else caminho_foto_local
+                enviar_para_telegram(foto_telegram, texto_final)
                 
-                # Dispara no WhatsApp (com a foto original ou texto)
+                # Dispara no WhatsApp: Foto original real do produto + Mensagem formatada completa
                 w_st = "Pendente"
                 if wpp_conectado:
                     res_w = enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
@@ -402,17 +434,22 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
         caminho_foto_local = item.get("caminho_imagem", "")
         if not (caminho_foto_local and os.path.exists(caminho_foto_local)) and foto_url:
             try:
-                r_f = requests.get(foto_url, timeout=15)
-                if len(r_f.content) > 5000:
+                r_f = requests.get(foto_url, headers=HEADERS, timeout=15)
+                if len(r_f.content) > 3000:
+                    from PIL import Image
+                    import io
+                    t_img = Image.open(io.BytesIO(r_f.content))
+                    t_img.verify()
                     caminho_foto_local = os.path.join(PASTA_MIDIA, f"reserva_{int(time.time())}.jpg")
                     with open(caminho_foto_local, "wb") as f_img:
                         f_img.write(r_f.content)
-            except Exception:
+            except Exception as e:
+                print(f"   ⚠️ Imagem da fila de reserva inválida: {e}")
                 caminho_foto_local = ""
                 
         # Gera Story Oficial 9:16 com a Logo da Família
         caminho_story = os.path.join(PASTA_STORIES, f"story_reserva_{int(time.time())}.png")
-        criar_story_9_16(
+        caminho_story_pronto = criar_story_9_16(
             caminho_foto_produto=caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else "",
             titulo=titulo,
             preco=preco,
@@ -422,7 +459,8 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
             caminho_saida=caminho_story
         )
         
-        foto_envio = caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else ""
+        foto_envio_wpp = caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else ""
+        foto_envio_tg = caminho_story_pronto if (caminho_story_pronto and os.path.exists(caminho_story_pronto)) else foto_envio_wpp
         
         texto_envio = item.get("texto", "")
         if not texto_envio:
@@ -434,11 +472,12 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
                 f"⚠️ *Oferta por tempo limitado!*"
             )
         
-        enviar_para_telegram(foto_envio, texto_envio)
+        # Telegram recebe o Story 9:16 com a Logo da Família
+        enviar_para_telegram(foto_envio_tg, texto_envio)
         
         w_st = "Pendente"
         if wpp_conectado:
-            res_w = enviar_para_grupo_whatsapp(foto_envio, texto_envio)
+            res_w = enviar_para_grupo_whatsapp(foto_envio_wpp, texto_envio)
             print(f"👉 RESPOSTA BAILEYS FILA: {res_w}")
             if res_w.get("sucesso") is True:
                 w_st = "Enviado"

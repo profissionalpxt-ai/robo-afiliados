@@ -81,19 +81,51 @@ def criar_story_9_16(
         draw.text(((largura - (bbox2[2] - bbox2[0])) // 2, y_titulo), txt_l2, font=font_titulo, fill=(18, 18, 20, 255))
 
     # 2. FOTO DO PRODUTO (Centro do card branco)
-    # Área disponível: y=530 até y=960 (altura máxima 430px, largura máxima 650px)
-    max_w, max_h = 650, 430
+    # Área disponível no card: y=530 até y=960 (largura máxima 680px, altura máxima 420px)
+    max_w, max_h = 680, 420
     centro_y = 530 + (max_h // 2)
     
-    if os.path.exists(caminho_foto_produto):
+    foto_colada_com_sucesso = False
+    if caminho_foto_produto and os.path.exists(caminho_foto_produto):
         try:
-            prod_img = Image.open(caminho_foto_produto).convert("RGBA")
-            prod_img.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
-            px = (largura - prod_img.width) // 2
-            py = centro_y - (prod_img.height // 2)
-            imagem.paste(prod_img, (px, py), prod_img if prod_img.mode == 'RGBA' else None)
+            # Validação estrita: abre e decodifica a imagem com Pillow
+            with Image.open(caminho_foto_produto) as img_raw:
+                prod_img = img_raw.convert("RGBA")
+                
+                # Redimensiona mantendo a proporção exata sem distorcer
+                prod_img.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+                
+                px = (largura - prod_img.width) // 2
+                py = centro_y - (prod_img.height // 2)
+                
+                # Cola a imagem do produto sobre o card branco
+                imagem.paste(prod_img, (px, py), prod_img)
+                foto_colada_com_sucesso = True
         except Exception as e:
-            print("Erro ao carregar foto do produto:", e)
+            print(f"⚠️ Imagem corrompida ou inválida ignorada ({caminho_foto_produto}): {e}")
+
+    # Se não houver foto válida ou arquivo corrompido, desenha badge estilizado de oferta
+    if not foto_colada_com_sucesso:
+        # Desenha uma área de destaque para não ficar buraco em branco
+        draw.rounded_rectangle(
+            [(250, 600), (830, 880)],
+            radius=20,
+            fill=(245, 248, 255, 255),
+            outline=(210, 225, 250, 255),
+            width=2
+        )
+        txt_destaque = "🛍️ OFERTA EXCLUSIVA" if not cupom else f"🎟️ CUPOM: {cupom}"
+        try:
+            font_destaque = ImageFont.truetype(fonte_bold, 40)
+        except Exception:
+            font_destaque = font_titulo
+        bbox_d = draw.textbbox((0, 0), txt_destaque, font=font_destaque)
+        draw.text(
+            ((largura - (bbox_d[2] - bbox_d[0])) // 2, 720),
+            txt_destaque,
+            font=font_destaque,
+            fill=(0, 85, 175, 255)
+        )
 
     # 3. BLOCO DE PREÇOS (y=980 até y=1340)
     y_bloco = 990
@@ -150,5 +182,5 @@ def criar_story_9_16(
         caminho_saida = os.path.join(os.path.dirname(__file__), "..", "stories_instagram", f"story_{abs(hash(titulo)) % 100000}.png")
         
     caminho_saida = os.path.normpath(caminho_saida)
-    imagem.convert("RGB").save(caminho_saida)
+    imagem.convert("RGB").save(caminho_saida, format="PNG", quality=95)
     return os.path.abspath(caminho_saida)
