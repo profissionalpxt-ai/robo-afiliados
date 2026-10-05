@@ -109,12 +109,10 @@ def faxina_pastas_temporarias():
                         pass
     gc.collect()
 
-# Os 5 Canais Monitorados (PRODUTOS COM FOTO NO TOPO, CUPOM EM ÚLTIMO)
+# Canais Ativos Monitorados (PRODUTOS COM FOTO NO TOPO, CUPOM EM ÚLTIMO)
 CANAIS_RADAR = [
-    "casaricadeoracao",      # Achadinhos para casa e cozinha (MUITOS PRODUTOS COM FOTO)
-    "escolhasegura",         # Eletrônicos, gadgets e utilidades (MUITOS PRODUTOS COM FOTO)
-    "Automa_Web_Ofertas_01", # Ofertas variadas e tecnologia (PRODUTOS COM FOTO)
-    "ofertasgamerandre",     # Acessórios, fones e setup (PRODUTOS COM FOTO)
+    "casaricadeoracao",      # Achadinhos para casa e cozinha (MUITOS PRODUTOS COM FOTO - ATIVO HOJE)
+    "escolhasegura",         # Eletrônicos, gadgets e utilidades (MUITOS PRODUTOS COM FOTO - ATIVO HOJE)
     "shopeebrcupom"          # Cupons oficiais (APENAS EM ÚLTIMO CASO SE NÃO HOUVER PRODUTO)
 ]
 
@@ -141,6 +139,16 @@ def extrair_titulo_produto(texto: str) -> str:
         if len(linha_limpa) >= 5:
             return linha_limpa[:55]
     return "Achadinho da Família"
+
+def extrair_codigo_cupom(texto: str) -> str:
+    """Extrai código de cupom promocional para alertar no texto fora da foto"""
+    stopwords = {'de', 'no', 'na', 'do', 'da', 'para', 'em', 'frete', 'desconto', 'app', 'pagina', 'loja', 'aqui', 'shopee'}
+    m = re.search(r'(?:use\s+o\s+cupom|com\s+o\s+cupom|aplique\s+o\s+cupom|cupom):?\s*([A-Za-z0-9_-]{3,})', texto, re.IGNORECASE)
+    if m:
+        c = m.group(1).strip()
+        if c.lower() not in stopwords:
+            return c.upper()
+    return ""
 
 def carregar_vistos() -> set:
     if os.path.exists(ARQUIVO_VISTOS):
@@ -225,7 +233,7 @@ def varrer_canais() -> list:
             soup = BeautifulSoup(r.text, 'html.parser')
             msgs = soup.find_all('div', class_=re.compile(r'tgme_widget_message\b'))
             
-            for msg in msgs[-10:]:
+            for msg in msgs[-15:]:
                 post_id = msg.get('data-post', '')
                 if not post_id or post_id in vistos:
                     continue
@@ -289,40 +297,43 @@ def varrer_canais() -> list:
                         print(f"   ⚠️ Falha ao baixar ou validar foto original: {e}")
                         caminho_foto_local = ""
 
-                # Identifica se é CUPOM ou PRODUTO
-                e_cupom = "cupom" in texto_original.lower() or canal == "shopeebrcupom"
-                titulo_log = extrair_titulo_produto(texto_original) if not e_cupom else "Cupom Promocional Shopee"
+                # Identifica cupom se houver no texto usando regex inteligente
+                cupom_extraido = extrair_codigo_cupom(texto_original)
                 
-                print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom else 'PRODUTO' } @{canal}]: {titulo_log}")
+                # Se for do canal de cupons sem foto ou sem imagem válida, é aviso de cupom
+                tem_foto_valida = bool(caminho_foto_local and os.path.exists(caminho_foto_local))
+                e_cupom_puro = (canal == "shopeebrcupom") or (not tem_foto_valida and "cupom" in texto_original.lower())
                 
-                # REGRAS ESPECÍFICAS DE CANAL:
-                # 1. CUPOM: NÃO gera Story 9:16 nem vai com imagem para o Telegram (Instagram não posta cupons sem item)
-                #    Envia apenas o texto limpo com link para o WhatsApp.
-                # 2. PRODUTO COM FOTO: Gera o Story 9:16 Oficial da Família para o Telegram (para Instagram Stories com espaço de link)
-                #    e envia a foto original real com texto para o WhatsApp.
+                titulo_log = extrair_titulo_produto(texto_original) if tem_foto_valida else "Cupom Promocional Shopee"
+                
+                # Destaque claro do cupom no texto (fora da foto) para o usuário saber que precisa ativar
+                texto_wpp = texto_final
+                if cupom_extraido and "ative o cupom" not in texto_wpp.lower():
+                    # Adiciona lembrete destacado no topo da mensagem
+                    texto_wpp = f"🎟️ *ATENÇÃO: Ative o cupom {cupom_extraido} no carrinho para obter o menor preço!*\n\n" + texto_wpp
+
+                print(f"\n🚀 [DISPARANDO { 'CUPOM' if e_cupom_puro else 'PRODUTO' } @{canal}]: {titulo_log}")
                 
                 tg_st = "Ignorado (Cupom)"
                 w_st = "Pendente"
                 
-                if e_cupom:
+                if e_cupom_puro:
                     # Envia no WhatsApp apenas o texto oficial do cupom com o link
                     if wpp_conectado:
-                        res_w = enviar_para_grupo_whatsapp("", texto_final)
+                        res_w = enviar_para_grupo_whatsapp("", texto_wpp)
                         print(f"👉 RESPOSTA BAILEYS CUPOM: {res_w}")
                         if res_w.get("sucesso") is True:
                             w_st = "Enviado"
                         else:
                             w_st = f"Erro ({res_w.get('erro', 'Falha')})"
                 else:
-                    # PRODUTO: Gera o Story 9:16 Oficial com a Logo da Família para o Telegram
+                    # PRODUTO COM FOTO: Gera o Story 9:16 Oficial com a Logo da Família para o Telegram
                     caminho_story_telegram = ""
                     try:
                         m_preco = re.search(r'(?:R\$|POR:?\s*R\$)\s*([\d\.,]+)', texto_original, re.IGNORECASE)
                         preco_extraido = m_preco.group(1) if m_preco else ""
                         m_de = re.search(r'DE:?\s*R\$\s*([\d\.,]+)', texto_original, re.IGNORECASE)
                         preco_de_extraido = m_de.group(1) if m_de else ""
-                        m_cupom = re.search(r'cupom:?\s*([A-Za-z0-9_-]+)', texto_original, re.IGNORECASE)
-                        cupom_extraido = m_cupom.group(1) if m_cupom else ""
 
                         caminho_story = os.path.join(PASTA_STORIES, f"story_{post_id.replace('/', '_')}.png")
                         caminho_story_telegram = criar_story_9_16(
@@ -341,9 +352,9 @@ def varrer_canais() -> list:
                     res_tg = enviar_para_telegram(foto_telegram, texto_final)
                     tg_st = "Enviado" if res_tg.get("sucesso") else "Erro"
 
-                    # Dispara no WhatsApp: Foto original real do produto + Mensagem formatada
+                    # Dispara no WhatsApp: Foto original real do produto + Mensagem com aviso de cupom
                     if wpp_conectado:
-                        res_w = enviar_para_grupo_whatsapp(caminho_foto_local, texto_final)
+                        res_w = enviar_para_grupo_whatsapp(caminho_foto_local, texto_wpp)
                         print(f"👉 RESPOSTA BAILEYS: {res_w}")
                         if res_w.get("sucesso") is True:
                             w_st = "Enviado"
@@ -354,7 +365,7 @@ def varrer_canais() -> list:
 
                 # Registra no log ao vivo
                 registrar_log_envio(
-                    tipo="CUPOM" if e_cupom else "PRODUTO",
+                    tipo="CUPOM" if e_cupom_puro else "PRODUTO",
                     titulo=titulo_log,
                     canal=canal,
                     wpp_status=w_st,
@@ -378,7 +389,7 @@ def varrer_canais() -> list:
                 novos_processados.append({
                     "post_id": post_id,
                     "canal": canal,
-                    "tipo": "cupom" if e_cupom else "produto",
+                    "tipo": "cupom" if e_cupom_puro else "produto",
                     "timestamp": int(time.time())
                 })
                 # Processa 1 item por ciclo para respeitar a cadência de 3 a 5 min
@@ -433,8 +444,8 @@ def salvar_oferta_na_fila(item_dict: dict):
             except Exception:
                 fila = []
         if not any(x.get("link_afiliado") == item_dict.get("link_afiliado") for x in fila):
-            fila.append(item_dict)
-            fila = fila[-50:]
+            fila.insert(0, item_dict)
+            fila = fila[:50]
             with open(ARQUIVO_FILA, "w", encoding="utf-8") as f:
                 json.dump(fila, f, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -495,17 +506,26 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
         if not titulo or titulo in ["Oferta Especial", "Achadinho Especial da Família"]:
             titulo = extrair_titulo_produto(texto_envio)
 
-        # Identifica se é CUPOM ou PRODUTO na fila
-        e_cupom = "cupom" in texto_envio.lower() or item.get("canal") == "shopeebrcupom"
-        
+        # Identifica cupom se houver no texto usando regex inteligente
+        cupom_extraido = extrair_codigo_cupom(texto_envio)
+
         foto_envio_wpp = caminho_foto_local if (caminho_foto_local and os.path.exists(caminho_foto_local)) else ""
+        
+        # Só é cupom puro se for canal de cupom ou se NÃO tiver foto e falar de cupom
+        e_cupom_puro = (item.get("canal") == "shopeebrcupom") or (not foto_envio_wpp and "cupom" in texto_envio.lower())
+
+        # Destaque claro do cupom no texto (fora da foto) para o usuário saber que precisa ativar
+        texto_wpp = texto_envio
+        if cupom_extraido and "ative o cupom" not in texto_wpp.lower():
+            texto_wpp = f"🎟️ *ATENÇÃO: Ative o cupom {cupom_extraido} no carrinho para obter o menor preço!*\n\n" + texto_wpp
+
         tg_st = "Ignorado (Cupom)"
         w_st = "Pendente"
 
-        if e_cupom:
-            # Cupom: apenas texto no WhatsApp, sem foto no Telegram
+        if e_cupom_puro:
+            # Cupom puro sem foto: apenas texto no WhatsApp, sem foto no Telegram
             if wpp_conectado:
-                res_w = enviar_para_grupo_whatsapp("", texto_envio)
+                res_w = enviar_para_grupo_whatsapp("", texto_wpp)
                 print(f"👉 RESPOSTA BAILEYS FILA CUPOM: {res_w}")
                 if res_w.get("sucesso") is True:
                     w_st = "Enviado"
@@ -519,7 +539,7 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
                 titulo=titulo,
                 preco=preco,
                 preco_antigo=preco_antigo,
-                cupom=cupom,
+                cupom=cupom_extraido if cupom_extraido else cupom,
                 condicao=condicao,
                 caminho_saida=caminho_story
             )
@@ -527,8 +547,9 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
             res_tg = enviar_para_telegram(foto_envio_tg, texto_envio)
             tg_st = "Enviado" if res_tg.get("sucesso") else "Erro"
 
+            # Dispara no WhatsApp: Foto original real do produto + Mensagem com aviso de cupom
             if wpp_conectado:
-                res_w = enviar_para_grupo_whatsapp(foto_envio_wpp, texto_envio)
+                res_w = enviar_para_grupo_whatsapp(foto_envio_wpp, texto_wpp)
                 print(f"👉 RESPOSTA BAILEYS FILA: {res_w}")
                 if res_w.get("sucesso") is True:
                     w_st = "Enviado"
@@ -536,7 +557,7 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
                     w_st = f"Erro ({res_w.get('erro', 'Falha')})"
             
         registrar_log_envio(
-            tipo="PRODUTO",
+            tipo="CUPOM" if e_cupom_puro else "PRODUTO",
             titulo=titulo,
             canal="@Fila_Reserva",
             wpp_status=w_st,
