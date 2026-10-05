@@ -122,20 +122,68 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 }
 
+def limpar_linhas_espelhadas_emojis(texto: str) -> str:
+    """Corrige textos onde os emojis foram separados em linhas isoladas, unindo-os ao texto"""
+    if not texto:
+        return ""
+    linhas = [l.strip() for l in texto.split('\n')]
+    linhas_limpas = []
+    i = 0
+    while i < len(linhas):
+        linha = linhas[i]
+        if not linha:
+            if linhas_limpas and linhas_limpas[-1] != "":
+                linhas_limpas.append("")
+            i += 1
+            continue
+        # Se a linha contiver APENAS emojis ou símbolos gráficos (sem letras/números)
+        if re.match(r'^[^\w\s\d]+$', linha):
+            j = i + 1
+            while j < len(linhas) and not linhas[j]:
+                j += 1
+            if j < len(linhas) and linhas[j]:
+                linhas_limpas.append(f"{linha} {linhas[j]}")
+                i = j + 1
+                continue
+            else:
+                linhas_limpas.append(linha)
+                i += 1
+                continue
+        else:
+            linhas_limpas.append(linha)
+            i += 1
+    res = '\n'.join(linhas_limpas).strip()
+    return re.sub(r'\n{3,}', '\n\n', res)
+
+def formatar_html_telegram_para_whatsapp(tag) -> str:
+    """Converte o HTML da mensagem do Telegram mantendo emojis na mesma linha,
+    convertendo negrito para asteriscos do WhatsApp e respeitando a diagramação original."""
+    if not tag:
+        return ""
+    raw = ''.join(str(c) for c in tag.contents)
+    raw = re.sub(r'<br\s*/?>', '\n', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'</p\s*>', '\n', raw, flags=re.IGNORECASE)
+    raw = re.sub(r'<b\b[^>]*>(.*?)</b>', r'*\1*', raw, flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r'<strong\b[^>]*>(.*?)</strong>', r'*\1*', raw, flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r'<[^>]+>', '', raw)
+    # Remove asteriscos redundantes ao redor de emojis
+    raw = re.sub(r'\*([^\w\s\d]+)\*', r'\1', raw)
+    texto = html.unescape(raw)
+    return limpar_linhas_espelhadas_emojis(texto)
+
 def extrair_titulo_produto(texto: str) -> str:
     """Extrai com precisão cirúrgica o nome real do produto sem emojis ou tags"""
     for linha in texto.split('\n'):
         linha = linha.strip()
         if not linha:
             continue
-        # Ignora linhas só com emojis
-        if re.match(r'^[^\w\s]*$', linha):
+        # Remove emojis, asteriscos e pontuação do início para análise limpa
+        linha_limpa = re.sub(r'^[^\w\s]+', '', linha).replace('*', '').strip()
+        if not linha_limpa:
             continue
         # Ignora palavras de cabeçalho ou tags promocionais
-        if any(linha.lower().startswith(x) for x in ['achadinho', 'confira', 'cupom', 'de:', 'por:', 'use o', 'resgate', 'link', 'compre', '#', 'oferta', 'alerta', 'total']):
+        if any(linha_limpa.lower().startswith(x) for x in ['achadinho', 'confira', 'cupom', 'de:', 'por:', 'use o', 'resgate', 'link', 'compre', '#', 'oferta', 'alerta', 'total']):
             continue
-        # Remove emojis do início da linha se houver
-        linha_limpa = re.sub(r'^[^\w\s]+', '', linha).strip()
         if len(linha_limpa) >= 5:
             return linha_limpa[:55]
     return "Achadinho da Família"
@@ -250,8 +298,8 @@ def varrer_canais() -> list:
                 if not div_text:
                     continue
                     
-                texto_original = div_text.get_text(separator='\n').strip()
-                texto_original = html.unescape(texto_original)
+                # Extrai o texto da mensagem mantendo layout idêntico e emojis na mesma linha
+                texto_original = formatar_html_telegram_para_whatsapp(div_text)
                 
                 # Substitui apenas os links pelos links de afiliado corretos
                 texto_final = texto_original
@@ -501,6 +549,8 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
                 f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
                 f"⚠️ *Oferta por tempo limitado!*"
             )
+        else:
+            texto_envio = limpar_linhas_espelhadas_emojis(texto_envio)
 
         # Garante título real e preciso
         if not titulo or titulo in ["Oferta Especial", "Achadinho Especial da Família"]:
