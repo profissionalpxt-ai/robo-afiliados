@@ -1,4 +1,5 @@
 import os
+import re
 from PIL import Image, ImageDraw, ImageFont
 
 CAMINHO_TEMPLATE_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "template_story_base_clean.png"))
@@ -131,8 +132,10 @@ def criar_story_9_16(
     y_bloco = 990
     
     # Preço Antigo (De: R$ XX,XX)
-    if preco_antigo:
-        txt_de = f"De: R$ {preco_antigo}"
+    preco_antigo_str = str(preco_antigo or "").strip()
+    if preco_antigo_str and re.search(r'\d', preco_antigo_str):
+        p_antigo_limpo = re.sub(r'^R\$\s*', '', preco_antigo_str, flags=re.IGNORECASE).strip()
+        txt_de = f"De: R$ {p_antigo_limpo}"
         bbox_de = draw.textbbox((0, 0), txt_de, font=font_de)
         dx = (largura - (bbox_de[2] - bbox_de[0])) // 2
         draw.text((dx, y_bloco), txt_de, font=font_de, fill=(110, 110, 110, 255))
@@ -141,21 +144,33 @@ def criar_story_9_16(
         y_bloco += 55
 
     # Preço Atual: "Por apenas:" (dourado) + "R$ XX,XX" (azul escuro)
-    txt_label = "Por apenas: "
-    txt_val = f"R$ {preco}"
+    preco_str = str(preco or "").strip()
+    tem_numero = bool(re.search(r'\d', preco_str))
     
-    bbox_label = draw.textbbox((0, 0), txt_label, font=font_por_label)
-    bbox_val = draw.textbbox((0, 0), txt_val, font=font_por_preco)
-    
-    largura_total = (bbox_label[2] - bbox_label[0]) + (bbox_val[2] - bbox_val[0])
-    inicio_x = (largura - largura_total) // 2
-    
-    # "Por apenas:" em Amarelo/Dourado do template
-    draw.text((inicio_x, y_bloco), txt_label, font=font_por_label, fill=(245, 175, 25, 255))
-    # "R$ XX,XX" em Azul Royal
-    val_x = inicio_x + (bbox_label[2] - bbox_label[0])
-    draw.text((val_x, y_bloco - 4), txt_val, font=font_por_preco, fill=(0, 85, 175, 255))
-    y_bloco += 75
+    if tem_numero:
+        preco_limpo = re.sub(r'^R\$\s*', '', preco_str, flags=re.IGNORECASE).strip()
+        txt_label = "Por apenas: "
+        txt_val = f"R$ {preco_limpo}"
+        
+        bbox_label = draw.textbbox((0, 0), txt_label, font=font_por_label)
+        bbox_val = draw.textbbox((0, 0), txt_val, font=font_por_preco)
+        
+        largura_total = (bbox_label[2] - bbox_label[0]) + (bbox_val[2] - bbox_val[0])
+        inicio_x = (largura - largura_total) // 2
+        
+        # "Por apenas:" em Amarelo/Dourado do template
+        draw.text((inicio_x, y_bloco), txt_label, font=font_por_label, fill=(245, 175, 25, 255))
+        # "R$ XX,XX" em Azul Royal
+        val_x = inicio_x + (bbox_label[2] - bbox_label[0])
+        draw.text((val_x, y_bloco - 4), txt_val, font=font_por_preco, fill=(0, 85, 175, 255))
+        y_bloco += 75
+    else:
+        # Se não houver valor numérico (evita exibir "R$ Oferta")
+        txt_destaque_oferta = "Confira a Oferta Especial"
+        bbox_dest = draw.textbbox((0, 0), txt_destaque_oferta, font=font_por_label)
+        dx = (largura - (bbox_dest[2] - bbox_dest[0])) // 2
+        draw.text((dx, y_bloco), txt_destaque_oferta, font=font_por_label, fill=(245, 175, 25, 255))
+        y_bloco += 60
 
     # 4. CUPOM DE DESCONTO OU INSTRUÇÃO DE BENEFÍCIO
     if cupom:

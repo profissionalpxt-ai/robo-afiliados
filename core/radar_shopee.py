@@ -198,6 +198,62 @@ def extrair_codigo_cupom(texto: str) -> str:
             return c.upper()
     return ""
 
+def extrair_precos(texto: str) -> tuple:
+    """
+    Extrai com máxima precisão o preço atual (promocional) e o preço antigo (DE: R$).
+    Ignora inteligentemente parcelas (ex: 12x de R$ 199,92).
+    Retorna uma tupla: (preco_atual, preco_antigo).
+    """
+    if not texto:
+        return ("", "")
+    
+    preco_antigo = ""
+    preco_atual = ""
+    
+    # Filtra linhas com parcelamento para nunca confundir parcelas com preço à vista
+    linhas_sem_parcelas = []
+    for l in texto.split('\n'):
+        if re.search(r'\b\d{1,2}x\s+de\b', l, re.IGNORECASE) or re.search(r'\bparcelas?\b', l, re.IGNORECASE):
+            continue
+        linhas_sem_parcelas.append(l)
+    texto_filtrado = '\n'.join(linhas_sem_parcelas)
+
+    # 1. Procura Preço Antigo (ex: DE: R$ 239,00 ou De R$ 239,00 ou ~R$ 239,00~)
+    m_de = re.search(r'(?:^|[\n\r])\s*(?:de:?)\s*r\$\s*([\d\.,]+)', texto_filtrado, re.IGNORECASE)
+    if not m_de:
+        m_de = re.search(r'\bde:?\s*r\$\s*([\d\.,]+)', texto_filtrado, re.IGNORECASE)
+    if m_de:
+        preco_antigo = m_de.group(1).strip()
+    else:
+        m_de_alt = re.search(r'~r\$\s*([\d\.,]+)~', texto_filtrado, re.IGNORECASE)
+        if m_de_alt:
+            preco_antigo = m_de_alt.group(1).strip()
+            
+    # 2. Procura Preço Atual Promocional (prioriza POR:, por apenas, ou ícone de dinheiro)
+    m_por = re.search(r'(?:por:?|por apenas|apenas|a partir de|\U0001F4B0)\s*r\$\s*([\d\.,]+)', texto_filtrado, re.IGNORECASE)
+    if m_por:
+        preco_atual = m_por.group(1).strip()
+    
+    # Se ainda não encontrou com prefixo explícito, procura qualquer R$ no texto filtrado
+    if not preco_atual:
+        todos_r = re.findall(r'r\$\s*([\d\.,]+)', texto_filtrado, re.IGNORECASE)
+        for r_val in todos_r:
+            r_val = r_val.strip()
+            # Se for diferente do preço antigo, é o preço atual!
+            if r_val != preco_antigo:
+                preco_atual = r_val
+                break
+        if not preco_atual and todos_r:
+            preco_atual = todos_r[0].strip()
+
+    # Sanitização: remove pontos ou vírgulas extras no final
+    if preco_atual:
+        preco_atual = re.sub(r'[\.,]$', '', preco_atual)
+    if preco_antigo:
+        preco_antigo = re.sub(r'[\.,]$', '', preco_antigo)
+        
+    return (preco_atual, preco_antigo)
+
 def carregar_vistos() -> set:
     if os.path.exists(ARQUIVO_VISTOS):
         try:
@@ -347,6 +403,7 @@ def varrer_canais() -> list:
 
                 # Identifica cupom se houver no texto usando regex inteligente
                 cupom_extraido = extrair_codigo_cupom(texto_original)
+                preco_extraido, preco_de_extraido = extrair_precos(texto_original)
                 
                 # Se for do canal de cupons sem foto ou sem imagem válida, é aviso de cupom
                 tem_foto_valida = bool(caminho_foto_local and os.path.exists(caminho_foto_local))
@@ -378,16 +435,11 @@ def varrer_canais() -> list:
                     # PRODUTO COM FOTO: Gera o Story 9:16 Oficial com a Logo da Família para o Telegram
                     caminho_story_telegram = ""
                     try:
-                        m_preco = re.search(r'(?:R\$|POR:?\s*R\$)\s*([\d\.,]+)', texto_original, re.IGNORECASE)
-                        preco_extraido = m_preco.group(1) if m_preco else ""
-                        m_de = re.search(r'DE:?\s*R\$\s*([\d\.,]+)', texto_original, re.IGNORECASE)
-                        preco_de_extraido = m_de.group(1) if m_de else ""
-
                         caminho_story = os.path.join(PASTA_STORIES, f"story_{post_id.replace('/', '_')}.png")
                         caminho_story_telegram = criar_story_9_16(
                             caminho_foto_produto=caminho_foto_local,
                             titulo=titulo_log,
-                            preco=preco_extraido if preco_extraido else "Oferta",
+                            preco=preco_extraido,
                             preco_antigo=preco_de_extraido,
                             cupom=cupom_extraido,
                             caminho_saida=caminho_story
@@ -428,7 +480,10 @@ def varrer_canais() -> list:
                         "texto": texto_final,
                         "link_afiliado": link_principal,
                         "foto_url": foto_url,
-                        "canal": canal
+                        "canal": canal,
+                        "preco": preco_extraido,
+                        "preco_antigo": preco_de_extraido,
+                        "cupom": cupom_extraido
                     })
 
                 limpar_arquivos_temporarios([caminho_foto_local])
@@ -515,7 +570,7 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
             json.dump(fila, f, indent=2, ensure_ascii=False)
             
         titulo = item.get("titulo", "Achadinho Especial da Família")
-        preco = item.get("preco", "Oferta")
+        preco = item.get("preco", "")
         preco_antigo = item.get("preco_antigo", "")
         cupom = item.get("cupom", "Cupom de Frete no App")
         condicao = item.get("condicao", "")
@@ -541,16 +596,26 @@ def disparar_item_fila_reserva(wpp_conectado: bool):
                 caminho_foto_local = ""
 
         texto_envio = item.get("texto", "")
+        if texto_envio:
+            texto_envio = limpar_linhas_espelhadas_emojis(texto_envio)
+
+        # Se o preço não foi gravado ou veio como "Oferta", extrai com precisão do texto da oferta
+        if not preco or str(preco).strip().lower() == "oferta":
+            p_ext, p_ant_ext = extrair_precos(texto_envio)
+            if p_ext:
+                preco = p_ext
+            if not preco_antigo and p_ant_ext:
+                preco_antigo = p_ant_ext
+
         if not texto_envio:
+            texto_preco = f"💰 *Por apenas: R$ {preco}*\n" if preco else ""
             texto_envio = (
                 f"🛍️ *{titulo}*\n\n"
-                f"💰 *Por apenas: R$ {preco}*\n"
+                f"{texto_preco}"
                 f"🚚 *Benefício:* Cupom de Frete no App\n\n"
                 f"🛒 *Compre com segurança aqui:*\n{link_usuario}\n\n"
                 f"⚠️ *Oferta por tempo limitado!*"
             )
-        else:
-            texto_envio = limpar_linhas_espelhadas_emojis(texto_envio)
 
         # Garante título real e preciso
         if not titulo or titulo in ["Oferta Especial", "Achadinho Especial da Família"]:
