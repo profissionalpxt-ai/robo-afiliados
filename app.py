@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import threading
+import requests
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
@@ -80,22 +81,23 @@ HTML_DASHBOARD = """
 import gc
 import subprocess
 
-def iniciar_servico_baileys():
-    time.sleep(2)
-    # Se o Baileys já estiver rodando (iniciado pelo start.sh), não inicia outro processo
+procedimento_baileys = None
+
+def checar_ou_iniciar_baileys():
+    """Verifica se o Baileys está respondendo na porta 3333. Se não estiver, inicia imediatamente."""
+    global procedimento_baileys
     try:
         r = requests.get("http://127.0.0.1:3333/status", timeout=2)
         if r.status_code == 200:
-            print("✅ [NUVEM] Baileys já está ativo na porta 3333.")
-            return
+            return True
     except Exception:
         pass
 
     caminho_baileys = os.path.join(os.path.dirname(os.path.abspath(__file__)), "whatsapp_baileys")
     index_file = os.path.join(caminho_baileys, "index.js")
     node_modules = os.path.join(caminho_baileys, "node_modules")
-    
-    # Se estiver rodando na nuvem e o node_modules não estiver presente, instala sozinho
+
+    # Se estiver rodando na nuvem e o node_modules não estiver presente, instala
     if not os.path.exists(node_modules) and os.path.exists(caminho_baileys):
         try:
             print("📦 [NUVEM] Instalando dependências do Baileys via npm...")
@@ -106,16 +108,29 @@ def iniciar_servico_baileys():
 
     if os.path.exists(index_file):
         try:
-            print("🚀 [NUVEM] Inicializando Conector WhatsApp Baileys em background...")
+            print("🚀 [NUVEM] Inicializando Conector WhatsApp Baileys na porta 3333...")
             env = os.environ.copy()
             env["NODE_OPTIONS"] = "--max-old-space-size=128"
-            subprocess.Popen(["node", "index.js"], cwd=caminho_baileys, env=env)
-            print("✅ [NUVEM] Processo Baileys WhatsApp ativo na porta 3333!")
+            procedimento_baileys = subprocess.Popen(["node", "index.js"], cwd=caminho_baileys, env=env)
+            print("✅ [NUVEM] Processo Baileys WhatsApp iniciado com sucesso!")
+            time.sleep(3)
+            return True
         except Exception as e:
             print(f"⚠️ [NUVEM] Erro ao iniciar Baileys: {e}")
+    return False
 
-# Inicia o conector WhatsApp Baileys em segundo plano
-threading.Thread(target=iniciar_servico_baileys, daemon=True).start()
+def watchdog_baileys_background():
+    """Supervisor contínuo: roda a cada 20s e garante que o Baileys NUNCA fique morto na nuvem."""
+    time.sleep(3)
+    while True:
+        try:
+            checar_ou_iniciar_baileys()
+        except Exception as err:
+            print(f"⚠️ [WATCHDOG] Erro ao supervisionar Baileys: {err}")
+        time.sleep(20)
+
+# Inicia o supervisor do Baileys em segundo plano
+threading.Thread(target=watchdog_baileys_background, daemon=True).start()
 
 def iniciar_radar_background():
     # Aguarda 10 segundos para dar tempo do Baileys subir e conectar
@@ -216,6 +231,9 @@ def api_desconectar_whatsapp():
         if os.path.exists(pasta_auth):
             shutil.rmtree(pasta_auth, ignore_errors=True)
             os.makedirs(pasta_auth, exist_ok=True)
+
+        # Garante que o processo Baileys esteja rodando para gerar o QR Code imediatamente
+        checar_ou_iniciar_baileys()
 
         return jsonify({"status": "sucesso", "mensagem": "WhatsApp desconectado com sucesso! Gerando novo QR Code..."}), 200
     except Exception as e:

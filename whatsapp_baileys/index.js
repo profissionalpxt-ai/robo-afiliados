@@ -13,6 +13,14 @@ const http = require('http');
 const PASTA_COFRE = path.join(__dirname, 'auth_info_baileys');
 const ARQUIVO_CONFIG = path.join(__dirname, 'grupo_config.json');
 
+// Previne quedas do processo por erros não capturados na rede
+process.on('uncaughtException', (err) => {
+    console.error('⚠️ [BAILEYS] Uncaught Exception:', err.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('⚠️ [BAILEYS] Unhandled Rejection:', reason);
+});
+
 // Garante que a pasta do cofre existe
 if (!fs.existsSync(PASTA_COFRE)) {
     fs.mkdirSync(PASTA_COFRE, { recursive: true });
@@ -66,11 +74,22 @@ async function iniciarBotWhatsApp() {
         if (connection === 'close') {
             estaConectado = false;
             const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            console.log(`⚠️ Conexão fechada (${statusCode}). Reconectando: ${shouldReconnect}`);
-            if (shouldReconnect) {
-                setTimeout(iniciarBotWhatsApp, 3000);
+            const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+            console.log(`⚠️ Conexão fechada (${statusCode}). Logged out: ${isLoggedOut}`);
+
+            if (isLoggedOut) {
+                console.log("🛑 Sessão desconectada no celular. Limpando credenciais para gerar novo QR Code...");
+                try {
+                    if (fs.existsSync(PASTA_COFRE)) {
+                        fs.rmSync(PASTA_COFRE, { recursive: true, force: true });
+                        fs.mkdirSync(PASTA_COFRE, { recursive: true });
+                    }
+                } catch (e) {
+                    console.error("Erro ao limpar credenciais:", e);
+                }
             }
+            // Sempre reinicia para manter o conector ativo e gerar QR Code no painel
+            setTimeout(iniciarBotWhatsApp, 3000);
         } else if (connection === 'open') {
             estaConectado = true;
             ultimoQr = null;
